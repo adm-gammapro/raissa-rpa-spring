@@ -1,23 +1,26 @@
 package com.raissa.rpa.controller;
 
+import com.raissa.rpa.domain.entity.RequestInformation;
 import com.raissa.rpa.domain.entity.Session;
+import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.service.AuthService;
 import com.raissa.rpa.service.BCPService;
 import com.raissa.rpa.service.LoggingService;
 import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.util.Constantes;
+import com.raissa.rpa.util.ResponseGeneric;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -33,39 +36,38 @@ public class BCPController {
     /**
      * Login en BCP
      */
-    @PostMapping("/login")
+    @PostMapping("/login/{transactionId}")
     public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, String> credentials,
-                                                     HttpServletRequest request) {
+                                                                 @PathVariable String transactionId,
+                                                                 HttpServletRequest request) {
 
         log.info("Solicitud login BCP recibida");
+        String clientIp = ResponseGeneric.getClientIp(request);
+        String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+        Session session = validationService.validateSession(transactionId);
+
+        RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_LOGIN_BCP, userAgent);
 
         try {
-            Map<String, Object> bcpResult = bcpService.login(credentials);
+            Map<String, Object> bcpResult = bcpService.login(credentials, transactionId);
 
-            if (!(Boolean) bcpResult.get("success")) {
-                throw new RuntimeException("Error en login BCP: " + bcpResult.get("message"));
+            if (!(boolean) bcpResult.get(Constantes.KEY_SUCCESS)) {
+                loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
+
+                throw new BcpException("Error en login BCP: " + bcpResult.get(Constantes.KEY_MESSAGE));
             }
 
-            /*loggingService.logRequest(session, clientIp, "LOGIN_BCP");
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Login exitoso");
-            response.put("token", token);
-            response.put("transaction_id", transactionId);
-            response.put("full_name", account.getFullName());
-            response.put("bcp_session_id", bcpResult.get("transactionId"));
-
-            log.info("Login BCP exitoso para: {}, transactionId: {}", account.getFullName(), transactionId);*/
+            log.info("Login BCP exitoso para: {}, transactionId: {}", session.getAccount().getFullName(), transactionId);
 
             return ResponseEntity.ok(bcpResult);
 
         } catch (Exception e) {
             log.error("Error en login BCP: {}", e.getMessage());
 
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", e.getMessage());
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
+            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
             return ResponseEntity.badRequest().body(errorResponse);
         }
@@ -74,40 +76,33 @@ public class BCPController {
     /**
      * Obtener saldo de BCP
      */
-    @GetMapping("/saldo")
-    public ResponseEntity<Map<String, Object>> obtenerSaldo(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestParam String transactionId,
-            HttpServletRequest request) {
+    @PostMapping("/saldo/{transactionId}")
+    public ResponseEntity<Map<String, Object>> obtenerSaldo(@PathVariable String transactionId,
+                                                            HttpServletRequest request) {
 
         log.info("Solicitud saldo BCP recibida, transactionId: {}", transactionId);
 
+        String clientIp = ResponseGeneric.getClientIp(request);
+        String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+        Session session = validationService.validateSession(transactionId);
+
+        RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_OBTENER_SALDO_BCP, userAgent);
+
         try {
-            // Validar sesión
-            Session session = validationService.validateSession(transactionId);
 
-            // Obtener saldo
-            Map<String, Object> resp = bcpService.obtenerSaldo("dddddddd");
+            Map<String, Object> resp = bcpService.obtenerSaldo(transactionId);
 
-            // Loggear request
-            String clientIp = getClientIp(request);
-            loggingService.logCompleteRequest(session, clientIp, "OBTENER_SALDO","EXITO", "Tiempo estimado");
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("saldo", resp.get("saldo"));
-            response.put("transaction_id", transactionId);
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
             log.info("Saldo BCP obtenido exitosamente, transactionId: {}", transactionId);
 
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(resp);
 
         } catch (Exception e) {
             log.error("Error obteniendo saldo BCP: {}", e.getMessage());
 
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", e.getMessage());
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
+            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
             return ResponseEntity.badRequest().body(errorResponse);
         }
@@ -116,13 +111,12 @@ public class BCPController {
     /**
      * Obtener transacciones BCP
      */
-    @GetMapping("/transacciones")
-    public ResponseEntity<Map<String, Object>> obtenerTransacciones(
-            @RequestHeader("Authorization") String authHeader,
-            @RequestParam String transactionId,
-            @RequestParam String fechaInicio,
-            @RequestParam String fechaFin,
-            HttpServletRequest request) {
+    @GetMapping("/transacciones/{numCuenta}/{transactionId}")
+    public ResponseEntity<Map<String, Object>> obtenerTransacciones(@PathVariable String transactionId,
+                                                                    @PathVariable String numCuenta,
+                                                                    @RequestParam String fechaInicio,
+                                                                    @RequestParam String fechaFin,
+                                                                    HttpServletRequest request) {
 
         log.info("Solicitud transacciones BCP recibida, transactionId: {}", transactionId);
 
@@ -133,16 +127,14 @@ public class BCPController {
             // Obtener transacciones
             //String transacciones = bcpService.obtenerTransacciones(fechaInicio, fechaFin);
 
-            // Loggear request
-            String clientIp = getClientIp(request);
-            String requestData = String.format("FECHAS=%s-%s", fechaInicio, fechaFin);
-            loggingService.logCompleteRequest(session, clientIp, requestData,
-                    "EXITO", "Tiempo estimado");
+            String clientIp = ResponseGeneric.getClientIp(request);
+            String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
+            String requestData = String.format("FECHAS=%s-%s", fechaInicio, fechaFin);
+            loggingService.logCompleteRequest(session, clientIp, requestData,Constantes.RESP_REQUEST_EXITO, "0",userAgent, 0);
+
+            Map<String, Object> response = ResponseGeneric.buildSuccessResponse(transactionId, "Se obtiene movimientos correctamente", true);
             response.put("transacciones", "transacciones");
-            response.put("transaction_id", transactionId);
             response.put("fecha_inicio", fechaInicio);
             response.put("fecha_fin", fechaFin);
 
@@ -153,9 +145,7 @@ public class BCPController {
         } catch (Exception e) {
             log.error("Error obteniendo transacciones BCP: {}", e.getMessage());
 
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", e.getMessage());
+            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
             return ResponseEntity.badRequest().body(errorResponse);
         }
@@ -163,31 +153,27 @@ public class BCPController {
 
     /**
      * Logout de BCP
+     *
+     * @param transactionId id de transaccion
+     * @param request datos de la peticion
+     * @return {@link Map}
      */
-    @PostMapping("/logout")
-    public ResponseEntity<Map<String, Object>> logout(
-            @RequestParam String transactionId,
-            HttpServletRequest request) {
+    @PostMapping("/logout/{transactionId}")
+    public ResponseEntity<Map<String, Object>> logout(@PathVariable String transactionId,
+                                                      HttpServletRequest request) {
 
         log.info("Solicitud logout BCP recibida, transactionId: {}", transactionId);
 
+        String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+        Session session = validationService.validateSession(transactionId);
+        String clientIp = ResponseGeneric.getClientIp(request);
+
+        RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_LOGOUT_BCP, userAgent);
+
         try {
-            // Validar y cerrar sesión
-            Session session = validationService.validateSession(transactionId);
-            authService.logout(transactionId);
+            Map<String, Object> response = bcpService.logout(transactionId);
 
-            // Cerrar sesión en BCP
-            bcpService.logout();
-
-            // Loggear request
-            String clientIp = getClientIp(request);
-            loggingService.logCompleteRequest(session, clientIp, "LOGOUT",
-                    "EXITO", "Tiempo estimado");
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("message", "Logout exitoso");
-            response.put("transaction_id", transactionId);
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
             log.info("Logout BCP exitoso, transactionId: {}", transactionId);
 
@@ -196,28 +182,10 @@ public class BCPController {
         } catch (Exception e) {
             log.error("Error en logout BCP: {}", e.getMessage());
 
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("message", e.getMessage());
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
+            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
             return ResponseEntity.badRequest().body(errorResponse);
         }
-    }
-
-    /**
-     * Obtener IP del cliente
-     */
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
     }
 }

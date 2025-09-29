@@ -4,12 +4,16 @@ import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.BCPService;
 import com.raissa.rpa.util.Constantes;
+import com.raissa.rpa.util.ResponseGeneric;
 import com.twocaptcha.TwoCaptcha;
 import com.twocaptcha.captcha.Normal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
+import org.openqa.selenium.ElementNotInteractableException;
+import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -22,12 +26,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -54,15 +59,13 @@ public class BCPServiceImpl implements BCPService {
     @Value("${app.production:false}")
     private boolean isProduction;
 
-    private final Random random = new Random();
-
     private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
 
-    public Map<String, Object> login(Map<String, String> credentials) {
+    public Map<String, Object> login(Map<String, String> credentials,
+                                     String transactionId) {
         log.info("Iniciando proceso de login BCP");
 
         WebDriver driver = null;
-        String transactionId = generateTransactionId();
         boolean success = false;
         Map<String, Object> result;
 
@@ -78,8 +81,8 @@ public class BCPServiceImpl implements BCPService {
             }
 
             driver = new ChromeDriver(options);
-
             driver.get(bcpUrl);
+
             log.info("Navegando a: {}", bcpUrl);
 
             Thread.sleep(5000);
@@ -96,11 +99,11 @@ public class BCPServiceImpl implements BCPService {
             }
 
             enterPassword(driver, claveAcceso);
-            Thread.sleep(2000);
+            Thread.sleep(1000);
 
             // 3. ✅ MANEJAR CAPTCHA
             handleCaptcha(driver);
-            Thread.sleep(2000);
+            Thread.sleep(1000);
 
             // 4. ✅ CLICK EN BOTÓN LOGIN
             clickLoginButton(driver);
@@ -117,10 +120,7 @@ public class BCPServiceImpl implements BCPService {
             // 6. ✅ ÉXITO - Almacenar driver y retornar resultado
             driverCache.put(transactionId, driver);
 
-            result = new HashMap<>();
-            result.put(Constantes.KEY_SUCCESS, true);
-            result.put(Constantes.KEY_TRANSACTION_ID, transactionId);
-            result.put(Constantes.KEY_MESSAGE, "Login BCP exitoso");
+            result = ResponseGeneric.buildSuccessResponse(transactionId, "Login BCP exitoso", true);
 
             log.info("Login BCP completado exitosamente");
 
@@ -135,10 +135,8 @@ public class BCPServiceImpl implements BCPService {
         } catch (Exception e) {
             log.error("Error genérico en login BCP: {}", e.getMessage());
 
-            Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put(Constantes.KEY_SUCCESS, false);
+            Map<String, Object> errorResult = ResponseGeneric.buildSuccessResponse(transactionId, "Error interno del sistema. Contacte al administrador.", false);
             errorResult.put(Constantes.KEY_ERROR_CODE, "BCP_GENERIC_ERROR");
-            errorResult.put(Constantes.KEY_MESSAGE, "Error interno del sistema. Contacte al administrador.");
             errorResult.put(Constantes.KEY_TEC_MESSAGE, e.getMessage());
 
             return errorResult;
@@ -154,13 +152,90 @@ public class BCPServiceImpl implements BCPService {
         }
     }
 
-    /**
-     * Genera transactionId único
-     *
-     * @return {@link String}
-     */
-    public String generateTransactionId() {
-        return "BCP_" + System.currentTimeMillis() + "_" + random.nextInt(1000);
+    public Map<String, Object> logout(String transactionId) {
+        WebDriver driver = driverCache.get(transactionId);
+
+        if (driver == null) {
+            throw new BcpException("Sesión no encontrada",
+                    "BCP_SESSION_NOT_FOUND",
+                    "La sesión con ID " + transactionId + " no existe o ya fue cerrada");
+        }
+
+        try {
+            log.info("Iniciando proceso de logout para transactionId: {}", transactionId);
+
+            // 1. ✅ ABRIR EL DROPDOWN DE PERFIL (si no está visible)
+            openProfileDropdown(driver);
+
+            // 2. ✅ HACER CLICK EN "CERRAR SESIÓN"
+            clickLogoutButton(driver);
+
+            // 3. ✅ MANEJAR POSIBLE ENCUESTA NPS (si aparece)
+            handleNpsSurvey(driver);
+
+            // 4. ✅ VERIFICAR QUE EL LOGOUT FUE EXITOSO
+            boolean logoutSuccess = verifyLogoutSuccess(driver);
+
+            if (!logoutSuccess) {
+                log.warn("No se pudo verificar logout exitoso, cerrando navegador directamente");
+            }
+
+            // 5. ✅ CERRAR EL DRIVER
+            driver.quit();
+            log.debug("Driver cerrado exitosamente");
+
+        } catch (Exception e) {
+            log.error("Error durante logout: {}", e.getMessage());
+
+            driver.quit();
+
+            throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
+        } finally {
+            driverCache.remove(transactionId);
+            log.info("Sesión {} removida del cache", transactionId);
+        }
+
+        return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
+    }
+
+    public Map<String, Object> obtenerSaldo(String transactionId) {
+        Map<String, Object> result;
+        log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
+
+        try {
+            WebDriver driver = driverCache.get(transactionId);
+
+            if (driver == null) {
+                throw new SessionNotFoundException("Sesión no encontrada");
+            }
+
+            if (!isOnAccountsPage(driver)) {
+                throw new BcpException("No se pudo navegar a cuentas",
+                        "BCP_NAVIGATION_ERROR",
+                        "No se pudo acceder a la sección de cuentas");
+            }
+
+            // 2. ✅ Hacer clic en el tab "Cuentas"
+            clickAccountsTab(driver);
+
+            // 3. ✅ Esperar a que carguen los datos
+            waitForAccountsToLoad(driver);
+
+            // 4. ✅ Extraer datos de las cuentas
+            List<Map<String, Object>> accounts = extractAccountsData(driver);
+
+            // 5. ✅ Retornar resultados
+            result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
+            result.put("data", accounts);
+            result.put("count", accounts.size());
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Error obteniendo saldo BCP: {}", e.getMessage());
+
+            return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
+        }
     }
 
     /**
@@ -182,12 +257,12 @@ public class BCPServiceImpl implements BCPService {
             actions.sendKeys(Keys.TAB).perform();
             Thread.sleep(500);
             actions.sendKeys(Keys.TAB).perform();
-            Thread.sleep(2000);
+            Thread.sleep(1000);
 
             log.info("Usuario ingresado y tabs aplicados");
 
         } catch (TimeoutException e) {
-            throw BcpException.elementNotFound("input login", "input[name='ciam-input-card']");
+            throw BcpException.elementNotFound("input login", "input user");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BcpException("Interrupción durante la navegación",
@@ -271,7 +346,7 @@ public class BCPServiceImpl implements BCPService {
         Map<String, Integer> keyMap = new LinkedHashMap<>();
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
             List<WebElement> keyboardKeys = wait.until(
                     ExpectedConditions.presenceOfAllElementsLocatedBy(By.cssSelector("bcp-keyboard-key[index]"))
             );
@@ -496,7 +571,7 @@ public class BCPServiceImpl implements BCPService {
         try {
             String xpath = "//bcp-img[@class='bcp-img-host hydrated']/img[@height='48' and @width='127' and contains(@src, 'data:image')]";
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
             WebElement captchaImg = wait.until(
                     ExpectedConditions.visibilityOfElementLocated(By.xpath(xpath))
             );
@@ -589,12 +664,8 @@ public class BCPServiceImpl implements BCPService {
 
         int padding = base64.length() % 4;
         if (padding != 0) {
-            log.warn("Base64 con padding inusual: {} % 4 = {}", base64.length(), padding);
-
-            if (padding > 0) {
-                String corrected = base64 + "=".repeat(4 - padding);
-                log.info("Base64 corregido con padding: {} -> {}", base64.length(), corrected.length());
-            }
+            String corrected = base64 + "=".repeat(4 - padding);
+            log.info("Base64 corregido con padding: {} -> {}", base64.length(), corrected.length());
         }
     }
 
@@ -841,7 +912,7 @@ public class BCPServiceImpl implements BCPService {
      */
     private boolean isSideMenuVisible(WebDriver driver) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
             WebElement sideMenu = wait.until(
                     ExpectedConditions.visibilityOfElementLocated(By.cssSelector("bcp-menu-sidebar"))
             );
@@ -880,27 +951,7 @@ public class BCPServiceImpl implements BCPService {
             };
 
             for (String selector : dashboardSelectors) {
-                try {
-                    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
-                    WebElement element = wait.until(
-                            ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector))
-                    );
-
-                    if (element.isDisplayed()) {
-                        log.debug("Dashboard encontrado con selector: {}", selector);
-
-                        if (selector.equals("h1.title-lg")) {
-                            String titleText = element.getText();
-                            if (titleText.contains("Resumen de cuentas")) {
-                                log.info("Título del dashboard confirmado: {}", titleText);
-                                return true;
-                            }
-                        }
-                        return true;
-                    }
-                } catch (Exception e) {
-                    log.error("Selector {} no encontrado: {}", selector, e.getMessage());
-                }
+                return verificarLoadedDashboard(driver, selector);
             }
 
             log.error("Ningún selector de dashboard fue encontrado");
@@ -908,6 +959,37 @@ public class BCPServiceImpl implements BCPService {
 
         } catch (Exception e) {
             log.error("Error verificando dashboard: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Verifica si el dashboard se cargó
+     * @param driver maenjador de página
+     * @param selector elemento html
+     * @return {@link boolean}
+     */
+    private boolean verificarLoadedDashboard(WebDriver driver,
+                                             String selector) {
+        try {
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            WebElement element = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
+
+            if (element.isDisplayed()) {
+                log.debug("Dashboard encontrado con selector: {}", selector);
+
+                if (selector.equals("h1.title-lg")) {
+                    String titleText = element.getText();
+                    if (titleText.contains("Resumen de cuentas")) {
+                        log.info("Título del dashboard confirmado: {}", titleText);
+                        return true;
+                    }
+                }
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            log.error("Selector {} no encontrado: {}", selector, e.getMessage());
             return false;
         }
     }
@@ -930,20 +1012,10 @@ public class BCPServiceImpl implements BCPService {
                     "bcp-avatar" // El componente de avatar directamente
             };
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
             for (String selector : profileSelectors) {
-                try {
-                    List<WebElement> elements = wait.until(ExpectedConditions.visibilityOfAllElementsLocatedBy(By.cssSelector(selector)));
-                    if (!elements.isEmpty()) {
-                        log.debug("Perfil de usuario encontrado con selector: {}", selector);
-                        return true;
-                    }
-                } catch (TimeoutException e) {
-                    log.debug("Selector {} no encontrado dentro del tiempo de espera", selector);
-                } catch (Exception e) {
-                    log.debug("Error con selector {}: {}", selector, e.getMessage());
-                }
+                return buscaElementoPerfil(wait, selector);
             }
 
             return false;
@@ -954,16 +1026,41 @@ public class BCPServiceImpl implements BCPService {
     }
 
     /**
+     * Busca si cargo el perfil
+     *
+     * @param wait espera del manejador de página
+     * @param selector elemento html
+     * @return {@link boolean}
+     */
+    private boolean buscaElementoPerfil(WebDriverWait wait,
+                                        String selector){
+        try {
+            List<WebElement> elements = wait.until(ExpectedConditions.visibilityOfAllElementsLocatedBy(By.cssSelector(selector)));
+            if (!elements.isEmpty()) {
+                log.debug("Perfil de usuario encontrado con selector: {}", selector);
+                return true;
+            }
+            return false;
+        } catch (TimeoutException e) {
+            log.debug("Selector {} no encontrado dentro del tiempo de espera", selector);
+            return false;
+        } catch (Exception e) {
+            log.debug("Error con selector {}: {}", selector, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Maneja excepciones de interrupción de manera consistente
      *
      * @param e error de interrupcion
      */
     private void handleInterruptedException(InterruptedException e) {
-        log.error("Interrupción durante la verificación de login: {}", e.getMessage());
+        log.error("Interrupción durante la navegación: {}", e.getMessage());
         Thread.currentThread().interrupt();
         throw new BcpException("Interrupción durante la navegación",
                 "BCP_NAVIGATION_INTERRUPTED",
-                "El proceso fue interrumpido durante la verificación de login");
+                "El proceso fue interrumpido durante la navegación");
     }
 
 
@@ -975,36 +1072,7 @@ public class BCPServiceImpl implements BCPService {
 
 
 
-    /**
-     * Obtener saldo de BCP
-     */
-    public Map<String, Object> obtenerSaldo(String transactionId) {
-        log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
 
-        try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
-
-            Map<String, Object> result = new HashMap<>();
-            result.put(Constantes.KEY_SUCCESS, true);
-            result.put("saldo", "S/ 1,500.00"); // Ejemplo
-            result.put("moneda", "PEN");
-
-            return result;
-
-        } catch (Exception e) {
-            log.error("Error obteniendo saldo BCP: {}", e.getMessage());
-
-            Map<String, Object> errorResult = new HashMap<>();
-            errorResult.put("success", false);
-            errorResult.put("message", e.getMessage());
-
-            return errorResult;
-        }
-    }
 
     /**
      * Obtener transacciones por periodo
@@ -1030,15 +1098,632 @@ public class BCPServiceImpl implements BCPService {
     }*/
 
     /**
-     * Logout de BCP
+     * Abre el desplegable para cerrar sesion
+     *
+     * @param driver manejador de pagina
      */
-    public void logout() {
+    private void openProfileDropdown(WebDriver driver) {
         try {
-            log.info("Cerrando sesión BCP");
-            // TODO: Implementar logout en portal BCP
-            log.info("Sesión BCP cerrada");
+            log.debug("Buscando dropdown de perfil...");
+
+            String[] dropdownSelectors = {
+                    "bcp-avatar[accessible-aria-label*='Avatar']",
+                    "bcp-avatar.bcp-avatar-host-4-27-0",
+                    "bcp-avatar[class*='bcp-avatar-host']",
+                    "bcp-avatar[type='square']",
+                    "bcp-avatar[bg-color='primary-400']",
+                    ".avatar-container",
+                    ".avatar-container-square",
+                    "[aria-label*='Avatar']",
+                    "bcp-avatar"
+            };
+
+            for (String selector : dropdownSelectors) {
+                abreProfileDropdown(driver, selector);
+            }
         } catch (Exception e) {
-            log.error("Error en logout BCP: {}", e.getMessage());
+            log.warn("No se pudo abrir el dropdown de perfil: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Abre dropdown de perfil
+     * @param driver manejador de página
+     * @param selector elemento html
+     */
+    private void abreProfileDropdown(WebDriver driver,
+                                     String selector) {
+        try {
+            WebElement dropdown = driver.findElement(By.cssSelector(selector));
+            if (dropdown.isDisplayed()) {
+                dropdown.click();
+                log.debug("Dropdown de perfil abierto con selector: {}", selector);
+                Thread.sleep(2000);
+            }
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+
+            log.error("Selector {} no funcionó al intentar abrir perfil: {}", selector, e.getMessage());
+        }
+    }
+
+    /**
+     * Hace clic en el boton de cerrar sesion
+     *
+     * @param driver manejador de pagina
+     */
+    private void clickLogoutButton(WebDriver driver) {
+        try {
+            log.debug("Buscando botón de logout en footer-container...");
+
+            String[] logoutSelectors = {
+                    "//div[@class='footer-container']//bcp-button[@mode='light']//*[normalize-space()='Cerrar sesión']",
+                    "//div[@class='footer-container']//bcp-button[@class='bcp-button-host-4-27-0 hydrated']//*[normalize-space()='Cerrar sesión']",
+                    "//div[@class='footer-container']//*[normalize-space()='Cerrar sesión']",
+                    "//div[@class='footer-container']//bcp-icon[@name='sign-out-r']/following-sibling::text()[contains(., 'Cerrar sesión')]/..",
+                    "div.footer-container > bcp-button[type='button']",
+                    "div.footer-container bcp-button[mode='light']",
+                    "//div[@class='footer-container']//bcp-button//a[contains(@class, 'bcp-ffw-btn')]//span[normalize-space()='Cerrar sesión']"
+            };
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            for (String selector : logoutSelectors) {
+                if(validaClicLogoutButton(driver, wait, selector)) {
+                    break;
+                }
+            }
+
+            throw new NoSuchElementException("No se pudo encontrar el botón de cerrar sesión en el footer");
+
+        } catch (Exception e) {
+            log.error("Error haciendo click en logout: {}", e.getMessage());
+            throw new BcpException("No se pudo hacer logout", "BCP_LOGOUT_CLICK_ERROR",
+                    "No se pudo encontrar el botón de cerrar sesión");
+        }
+    }
+
+    /**
+     * Validar el elemento del logout para realizar clic
+     * @param driver manejador de página
+     * @param wait tiempo de espera al ubicar elemento
+     * @param selector elemento html
+     * @return {@link boolean}
+     */
+    private boolean validaClicLogoutButton(WebDriver driver,
+                                           WebDriverWait wait,
+                                           String selector) {
+        try {
+            WebElement element;
+
+            if (selector.startsWith("//")) {
+                element = wait.until(ExpectedConditions.elementToBeClickable(By.xpath(selector)));
+            } else {
+                element = wait.until(ExpectedConditions.elementToBeClickable(By.cssSelector(selector)));
+            }
+
+            if (isValidLogoutButton(element)) {
+                clickElementWithRetry(element, driver);
+                log.debug("Botón de logout clickeado con selector: {}", selector);
+                Thread.sleep(2000);
+                return true;
+            }
+
+            return false;
+        } catch (InterruptedException interr) {
+            handleInterruptedException(interr);
+            log.error("Se interrumpe clic: {}", interr.getMessage());
+            return false;
+        } catch (Exception e) {
+            log.error("Selector {} no funcionó: {}", selector, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Valida si el boton de logout es válido
+     * @param element elemento en página
+     * @return {@link boolean}
+     */
+    private boolean isValidLogoutButton(WebElement element) {
+        try {
+            if (!element.isDisplayed() || !element.isEnabled()) {
+                return false;
+            }
+
+            String text = element.getText().toLowerCase();
+            String tagName = element.getTagName().toLowerCase();
+
+            boolean hasLogoutText = text.contains("cerrar") ||
+                    text.contains("logout") ||
+                    text.contains("salir") ||
+                    text.contains("sign out");
+
+            boolean isClickable = tagName.equals("a") ||
+                    tagName.equals("button") ||
+                    tagName.equals("input");
+
+            return hasLogoutText && isClickable;
+
+        } catch (Exception e) {
+            log.debug("Error validando botón de logout: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Hace clic en el elemento de cerrar sesión
+     * @param element elemento en la página
+     * @param driver manejador de página
+     */
+    private void clickElementWithRetry(WebElement element, WebDriver driver) {
+        try {
+            element.click();
+        } catch (Exception e) {
+            log.debug("Click normal falló, intentando con JavaScript: {}", e.getMessage());
+
+            try {
+                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
+            } catch (Exception jsEx) {
+                log.debug("JavaScript click también falló: {}", jsEx.getMessage());
+
+                try {
+                    ((JavascriptExecutor) driver).executeScript(
+                            "arguments[0].style.display='block'; arguments[0].style.visibility='visible';", element);
+                    Thread.sleep(500);
+                    element.click();
+                } catch (InterruptedException interr) {
+                    handleInterruptedException(interr);
+                    log.warn("Se interrumpe click en logout: {}", interr.getMessage());
+                } catch (Exception finalEx) {
+                    throw new BcpException("No se pudo hacer click en el elemento");
+                }
+            }
+        }
+    }
+
+    /**
+     * Verifica si se abrio encuesta
+     *
+     * @param driver manejador de pagina
+     */
+    private void handleNpsSurvey(WebDriver driver) {
+        try {
+            log.debug("Verificando si aparece encuesta NPS...");
+
+            String[] npsSelectors = {
+                    "widget-nps",
+                    "lib-nps",
+                    ".nps",
+                    "[class*='nps__']",
+                    "bcp-paragraph:contains('Según tu experiencia')",
+                    "bcp-paragraph:contains('recomiendes')"
+            };
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            for (String selector : npsSelectors) {
+                buscaEncuesta(driver, wait, selector);
+            }
+
+            log.debug("No se detectó encuesta NPS");
+
+        } catch (Exception e) {
+            log.warn("Error manejando encuesta NPS: {}", e.getMessage());
+        }
+    }
+
+    private void buscaEncuesta(WebDriver driver,
+                               WebDriverWait wait,
+                               String selector) {
+        try {
+            WebElement survey = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
+            if (survey.isDisplayed()) {
+                log.debug("Encuesta NPS detectada, cerrando...");
+                closeNpsSurvey(driver);
+            }
+        } catch (TimeoutException e) {
+            log.error("Tiempo de espera sobrepasado");
+        } catch (Exception e) {
+            log.error("Error verificando encuesta con selector {}: {}", selector, e.getMessage());
+        }
+    }
+
+    /**
+     * Cierra encuesta
+     *
+     * @param driver manejador de pagina
+     */
+    private void closeNpsSurvey(WebDriver driver) {
+        try {
+            String[] closeSelectors = {
+                    ".nps__close button",
+                    "bcp-button[shape='icon']",
+                    "bcp-icon[name='close-r']",
+                    "[aria-label*='close']",
+                    "[class*='close']"
+            };
+
+            for (String selector : closeSelectors) {
+                boolean closed = tryCloseButtonWithSelector(driver, selector);
+                if (closed) {
+                    return;
+                }
+            }
+
+            log.debug("No se pudo cerrar encuesta, esperando...");
+            Thread.sleep(3000); // Esperar a que posiblemente desaparezca sola
+
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+            log.warn("Error cerrando encuesta NPS: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Hace clic en el boton de cerrar de la encuesta
+     *
+     * @param driver manejador de pagina
+     * @param selector selector de elemento
+     * @return {@link boolean}
+     */
+    private boolean tryCloseButtonWithSelector(WebDriver driver, String selector) {
+        try {
+            WebElement closeButton = driver.findElement(By.cssSelector(selector));
+            if (closeButton.isDisplayed() && closeButton.isEnabled()) {
+                closeButton.click();
+                log.debug("Encuesta NPS cerrada con selector: {}", selector);
+                Thread.sleep(2000);
+                return true;
+            }
+        } catch (NoSuchElementException e) {
+            log.debug("Selector {} no encontrado: {}", selector, e.getMessage());
+        } catch (ElementNotInteractableException e) {
+            log.debug("Selector {} no es interactuable: {}", selector, e.getMessage());
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+            log.debug("Interrupción con selector {}: {}", selector, e.getMessage());
+        } catch (Exception e) {
+            log.debug("Error con selector de encuesta {}: {}", selector, e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Verifica que se haya cerrado la sesion
+     *
+     * @param driver manejador de pagina
+     * @return {@link boolean}
+     */
+    private boolean verifyLogoutSuccess(WebDriver driver) {
+        try {
+            String[] logoutIndicators = {
+                    "input[name='ciam-input-card']",
+                    "//button//span[normalize-space()='Continuar']",
+                    "[class*='login']",
+                    "body:not(:has(.dashboard))"
+            };
+
+            boolean logoutDetected = checkAnyLogoutIndicator(driver, logoutIndicators);
+            if (logoutDetected) {
+                return true;
+            }
+
+            String currentUrl = driver.getCurrentUrl();
+            if (currentUrl != null &&
+                    (currentUrl.contains("login") ||
+                            currentUrl.contains("tarjeta-sesion") ||
+                            currentUrl.contains("loginunico"))) {
+                log.debug("Logout verificado por cambio de URL: {}", currentUrl);
+                return true;
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.warn("Error verificando logout: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Chequea si hay algun selector que indique que se cerror la sesion exitosamente
+     *
+     * @param driver maenjador de pagina
+     * @param selectors selector a buscar
+     * @return {@link boolean}
+     */
+    private boolean checkAnyLogoutIndicator(WebDriver driver, String[] selectors) {
+        for (String selector : selectors) {
+            if (checkLogoutWithSelector(driver, selector)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Cuerpo de la comparacion de selector que verifica logout
+     *
+     * @param driver manejador de pagina
+     * @param selector selector ubicar
+     * @return {@link boolean}
+     */
+    private boolean checkLogoutWithSelector(WebDriver driver, String selector) {
+        try {
+            List<WebElement> elements = driver.findElements(By.cssSelector(selector));
+            if (!elements.isEmpty() && elements.get(0).isDisplayed()) {
+                log.debug("Logout verificado con selector: {}", selector);
+                return true;
+            }
+        } catch (NoSuchElementException e) {
+            log.debug("Selector de verificacion de logout {} no encontrado: {}", selector, e.getMessage());
+        } catch (StaleElementReferenceException e) {
+            log.debug("Selector {} obsoleto: {}", selector, e.getMessage());
+        } catch (Exception e) {
+            log.debug("Selector {} no funcionó para verificar logout: {}", selector, e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * Selecciona tab de cuentas
+     *
+     * @param driver manejador de página
+     */
+    private void clickAccountsTab(WebDriver driver) {
+        try {
+            log.debug("Buscando tab 'Cuentas'...");
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            if(seleccionarTabCuentasXpath(wait)) {
+                return;
+            }
+
+            throw new NoSuchElementException("No se pudo encontrar el tab de Cuentas");
+
+        } catch (Exception e) {
+            log.error("Error haciendo click en tab Cuentas: {}", e.getMessage());
+            throw new BcpException("No se pudo acceder a la sección de cuentas",
+                    "BCP_ACCOUNTS_TAB_ERROR",
+                    "No se pudo encontrar el tab de Cuentas");
+        }
+    }
+
+    /**
+     * Seleccionar tab con selectores xpath
+     * @param wait tiempo de espera para busqueda
+     * @return {@link boolean}
+     */
+    private boolean seleccionarTabCuentasXpath(WebDriverWait wait) {
+        try {
+            WebElement tabElement = wait.until(ExpectedConditions.elementToBeClickable(By.xpath(
+                    "//bcp-tab-header-9nbaaa//button[.//span[normalize-space()='Cuentas']]"
+            )));
+
+            tabElement.click();
+            log.debug("Tab 'Cuentas' clickeado con XPath específico");
+            Thread.sleep(500);
+            return true;
+
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+            log.debug("Interrupción al intentar realizar clic con xpath {}", e.getMessage());
+            return false;
+        } catch (Exception e) {
+            log.debug("XPath específico también falló: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Verifica si se encuentra en el tab de cuentas
+     *
+     * @param driver manejador de página
+     * @return {@link boolean}
+     */
+    private boolean isOnAccountsPage(WebDriver driver) {
+        try {
+            String[] accountsIndicators = {
+                    "[class*='account']",
+                    "[data-role*='account']",
+                    "#accounts",
+                    ".account-balance",
+                    "bcp-account", // Componente de cuenta
+                    "table:contains('Cuenta')" // Tabla con información de cuentas
+            };
+
+            for (String selector : accountsIndicators) {
+                return verificarPaginaCuentas(driver, selector);
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.debug("Error verificando página de cuentas: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Ubicar elementos del tab de cuentas
+     *
+     * @param driver manejador de páginas
+     * @param selector elemento html
+     * @return {@link boolean}
+     */
+    private boolean verificarPaginaCuentas(WebDriver driver,
+                                           String selector) {
+        try {
+            List<WebElement> elements = driver.findElements(By.cssSelector(selector));
+            if (!elements.isEmpty() && elements.get(0).isDisplayed()) {
+                log.debug("Ya en página de cuentas - indicador: {}", selector);
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            log.debug("Indicador {} no visible: {}", selector, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Espera a que cargue la interfaz con las cuentas
+     *
+     * @param driver manejador de página
+     */
+    private void waitForAccountsToLoad(WebDriver driver) {
+        try {
+            log.debug("Esperando a que carguen los datos de cuentas...");
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.cssSelector(".account-balance, bcp-account, [data-account-number]")
+            ));
+
+            Thread.sleep(500);
+
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+            log.debug("Interrupción al esperar que carguen datos de cuenta {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error esperando carga de cuentas: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Metodo de extracción para saldos de cuentas
+     * @param driver manejador de página
+     * @return {@link List<Map>} lista de saldos y cuentas
+     */
+    private List<Map<String, Object>> extractAccountsData(WebDriver driver) {
+        List<Map<String, Object>> accounts = new ArrayList<>();
+
+        try {
+            log.debug("Extrayendo datos reales de cuentas...");
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+
+            WebElement dataTable = wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.cssSelector("bcp-data-table-9nbaaa")
+            ));
+
+            List<WebElement> accountRows = dataTable.findElements(By.xpath(
+                    ".//bcp-table-row-9nbaaa[contains(@index, '0000')]"
+            ));
+
+            log.debug("Encontradas {} filas de cuentas", accountRows.size());
+
+            for (WebElement row : accountRows) {
+                Map<String, Object> accountData = extractAccountFromRow(row);
+                accounts.add(accountData);
+                log.debug("Cuenta extraída: {}", accountData.get(Constantes.KEY_NUMERO_CUENTA));
+            }
+
+            return accounts;
+
+        } catch (Exception e) {
+            log.error("Error extrayendo datos de cuentas: {}", e.getMessage());
+            accounts.add(createMockAccountData());
+            return accounts;
+        }
+    }
+
+    /**
+     * Extrae saldos y cuentas fila a fila
+     * @param row fila
+     * @return {@link Map} datos de una cuenta por fila
+     */
+    private Map<String, Object> extractAccountFromRow(WebElement row) {
+        Map<String, Object> account = new HashMap<>();
+
+        try {
+            // 1. Número de cuenta
+            WebElement numeroCuentaElement = row.findElement(By.xpath(
+                    ".//bcp-paragraph-9nbaaa[@size='sm' and @color='text' and @family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
+            ));
+            String numeroCuenta = numeroCuentaElement.getText().trim();
+            numeroCuenta = cleanAccountNumber(numeroCuenta);
+            account.put(Constantes.KEY_NUMERO_CUENTA, numeroCuenta);
+
+            // 2. Moneda
+            WebElement monedaElement = row.findElement(By.xpath(
+                    ".//bcp-table-col-9nbaaa[@index='3']//bcp-paragraph-9nbaaa/p[@class='paragraph-sm bcp-font-regular onsurface-800']"
+            ));
+            String moneda = monedaElement.getText().trim();
+            account.put(Constantes.KEY_MONEDA, moneda.equals("Soles") ? "PEN" : "USD");
+
+            // 3. Saldo disponible
+            WebElement saldoDisponibleElement = row.findElement(By.xpath(
+                    ".//bcp-table-col-9nbaaa[@index='4']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
+            ));
+            String saldoDisponibleStr = saldoDisponibleElement.getText().trim();
+            double saldoDisponible = parseSaldo(saldoDisponibleStr);
+            account.put(Constantes.KEY_SALDO_DISP, saldoDisponible);
+
+            // 4. Saldo contable
+            WebElement saldoContableElement = row.findElement(By.xpath(
+                    ".//bcp-table-col-9nbaaa[@index='6']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
+            ));
+            String saldoContableStr = saldoContableElement.getText().trim();
+            double saldoContable = parseSaldo(saldoContableStr);
+            account.put(Constantes.KEY_SALDO_CONT, saldoContable);
+
+            return account;
+
+        } catch (Exception e) {
+            log.error("Error extrayendo datos de fila: {}", e.getMessage());
+            return createMockAccountData();
+        }
+    }
+
+    /**
+     * Formatea el monto mostrado en la pagina a numero
+     * @param saldoStr Saldo en texto
+     * @return {@link double} saldo en formato numerico
+     */
+    private double parseSaldo(String saldoStr) {
+        try {
+            String cleaned = saldoStr.replace("S/ ", "")
+                    .replace("$ ", "")
+                    .replace(",", "")
+                    .trim();
+
+            return Double.parseDouble(cleaned);
+        } catch (Exception e) {
+            log.warn("Error parseando saldo '{}': {}", saldoStr, e.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * Crea un mock para una cuenta vacia
+     * @return {@link List<Map>} lista vacia
+     */
+    private Map<String, Object> createMockAccountData() {
+        Map<String, Object> account = new HashMap<>();
+        account.put("numeroCuenta", "");
+        account.put("moneda", "");
+        account.put("saldoDisponible", "0.00");
+        account.put("saldoContable", "0.00");
+
+        log.debug("Datos mock generados: 1 cuenta");
+        return account;
+    }
+
+    /**
+     * Quitar caracteres especiales del número de cuenta
+     * @param rawAccountNumber numero de cuenta
+     * @return {@link String} numero de cuenta sin caracteres especiales
+     */
+    private String cleanAccountNumber(String rawAccountNumber) {
+        if (rawAccountNumber == null || rawAccountNumber.isEmpty()) {
+            return "";
+        }
+
+        // Quitar espacios, guiones, puntos, y otros caracteres no numéricos
+        return rawAccountNumber.replaceAll("[\\s\\-._]+", "");
     }
 }

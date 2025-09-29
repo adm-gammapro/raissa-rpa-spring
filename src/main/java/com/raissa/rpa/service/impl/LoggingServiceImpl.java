@@ -9,50 +9,69 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class LoggingServiceImpl implements LoggingService {
     private final RequestInformationRepository requestInformationRepository;
 
-    /**
-     * Registra un request en la base de datos
-     */
     @Transactional
-    public RequestInformation logRequest(Session session, String clientIp, String requestData) {
+    public RequestInformation logRequest(Session session,
+                                         String clientIp,
+                                         String requestData,
+                                         String userAgent) {
         log.info("Registrando request para session: {}", session.getId());
 
         RequestInformation requestInfo = new RequestInformation();
         requestInfo.setSession(session);
         requestInfo.setConsumerIp(clientIp);
         requestInfo.setRequestData(requestData);
+        requestInfo.setCreatedBy(userAgent);
+        requestInfo.setActive(1);
+
         return requestInformationRepository.save(requestInfo);
     }
 
-    /**
-     * Actualiza el estado de respuesta de un request
-     */
     @Transactional
-    public void updateResponseStatus(Long requestId, String responseStatus, String responseTime) {
+    public void updateResponseStatus(Long requestId,
+                                     String responseStatus) {
         log.info("Actualizando respuesta para request: {} - Status: {}", requestId, responseStatus);
 
+
+
         requestInformationRepository.findById(requestId).ifPresent(request -> {
+            LocalDateTime createdAt = request.getCreatedAt();
+            LocalDateTime now = LocalDateTime.now();
+
+            long diferenciaSegundos = Duration.between(createdAt, now).getSeconds();
+
             request.setResponseStatus(responseStatus);
-            request.setResponseTime(responseTime);
+            request.setActive(0);
+            request.setResponseTime(String.valueOf(diferenciaSegundos));
             requestInformationRepository.save(request);
         });
     }
 
-    /**
-     * Registra request y respuesta completo
-     */
     @Transactional
-    public RequestInformation logCompleteRequest(Session session, String clientIp,
-                                                 String requestData, String responseStatus,
-                                                 String responseTime) {
-        RequestInformation requestInfo = logRequest(session, clientIp, requestData);
+    public void logCompleteRequest(Session session,
+                                   String clientIp,
+                                   String requestData,
+                                   String responseStatus,
+                                   String responseTime,
+                                   String userAgent,
+                                   Integer activo) {
+        RequestInformation requestInfo = new RequestInformation();
+        requestInfo.setSession(session);
+        requestInfo.setConsumerIp(clientIp);
+        requestInfo.setCreatedBy(userAgent);
+        requestInfo.setRequestData(requestData);
         requestInfo.setResponseStatus(responseStatus);
         requestInfo.setResponseTime(responseTime);
-        return requestInformationRepository.save(requestInfo);
+        requestInfo.setActive(activo);
+
+        requestInformationRepository.save(requestInfo);
     }
 }

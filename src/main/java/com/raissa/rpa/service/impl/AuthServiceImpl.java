@@ -5,6 +5,7 @@ import com.raissa.rpa.domain.entity.Account;
 import com.raissa.rpa.domain.entity.Session;
 import com.raissa.rpa.domain.repository.AccountRepository;
 import com.raissa.rpa.domain.repository.SessionRepository;
+import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.AuthService;
 import com.raissa.rpa.service.ValidationService;
 import io.jsonwebtoken.Jwts;
@@ -41,9 +42,6 @@ public class AuthServiceImpl implements AuthService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    /**
-     * Genera token JWT para una cuenta
-     */
     public String generateToken(Account account, String transactionId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("fullName", account.getFullName());
@@ -60,9 +58,6 @@ public class AuthServiceImpl implements AuthService {
                 .compact();
     }
 
-    /**
-     * Crea una nueva sesión
-     */
     @Transactional
     public Session createSession(Account account,
                                  String token,
@@ -83,11 +78,6 @@ public class AuthServiceImpl implements AuthService {
         return sessionRepository.save(session);
     }
 
-
-
-    /**
-     * Cierra sesión (logout)
-     */
     @Transactional
     public void logout(String transactionId) {
         log.info("Cerrando sesión con transactionId: {}", transactionId);
@@ -109,7 +99,7 @@ public class AuthServiceImpl implements AuthService {
                     .parseSignedClaims(token)
                     .getPayload();
         } catch (Exception e) {
-            throw new RuntimeException("Token inválido o expirado");
+            throw new SessionNotFoundException("Token inválido o expirado");
         }
     }
 

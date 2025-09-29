@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -41,7 +43,7 @@ public class RequestInformation {
     private String responseTime;
 
     @Column(name = "active")
-    private Integer active = 1;
+    private Integer active;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -54,4 +56,16 @@ public class RequestInformation {
 
     @Column(name = "updated_by", length = 25)
     private String updatedBy;
+
+    @PrePersist
+    protected void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void preUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 }
