@@ -1,19 +1,17 @@
-package com.raissa.rpa.controller;
+package com.raissa.rpa.controller.bcp;
 
 import com.raissa.rpa.domain.entity.RequestInformation;
 import com.raissa.rpa.domain.entity.Session;
 import com.raissa.rpa.exception.BcpException;
-import com.raissa.rpa.service.AuthService;
-import com.raissa.rpa.service.BCPService;
-import com.raissa.rpa.service.LoggingService;
-import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.service.bcp.BCPEmpresaService;
+import com.raissa.rpa.service.commons.LoggingService;
+import com.raissa.rpa.service.commons.ValidationService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.ResponseGeneric;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,22 +22,26 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/bcp")
+@RequestMapping("/api/bcp-empresa")
 @RequiredArgsConstructor
 @Slf4j
-public class BCPController {
+public class BCPEmpresaController {
     private final ValidationService validationService;
-    private final AuthService authService;
-    private final BCPService bcpService;
+    private final BCPEmpresaService bcpEmpresaService;
     private final LoggingService loggingService;
 
     /**
      * Login en BCP
+     *
+     * @param credentials datos de acceso a la plataforma
+     * @param transactionId id de transaccion
+     * @param request datos de la peticion
+     * @return {@link Map} respuesta de logueo
      */
     @PostMapping("/login/{transactionId}")
     public ResponseEntity<Map<String, Object>> login(@RequestBody Map<String, String> credentials,
-                                                                 @PathVariable String transactionId,
-                                                                 HttpServletRequest request) {
+                                                     @PathVariable String transactionId,
+                                                     HttpServletRequest request) {
 
         log.info("Solicitud login BCP recibida");
         String clientIp = ResponseGeneric.getClientIp(request);
@@ -49,7 +51,7 @@ public class BCPController {
         RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_LOGIN_BCP, userAgent);
 
         try {
-            Map<String, Object> bcpResult = bcpService.login(credentials, transactionId);
+            Map<String, Object> bcpResult = bcpEmpresaService.login(credentials, transactionId);
 
             if (!(boolean) bcpResult.get(Constantes.KEY_SUCCESS)) {
                 loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
@@ -75,6 +77,10 @@ public class BCPController {
 
     /**
      * Obtener saldo de BCP
+     *
+     * @param transactionId id de transaccion
+     * @param request datos de la peticion
+     * @return {@link Map} datos con cuentas y saldos
      */
     @PostMapping("/saldo/{transactionId}")
     public ResponseEntity<Map<String, Object>> obtenerSaldo(@PathVariable String transactionId,
@@ -90,7 +96,7 @@ public class BCPController {
 
         try {
 
-            Map<String, Object> resp = bcpService.obtenerSaldo(transactionId);
+            Map<String, Object> resp = bcpEmpresaService.obtenerSaldo(transactionId);
 
             loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
@@ -110,8 +116,15 @@ public class BCPController {
 
     /**
      * Obtener transacciones BCP
+     *
+     * @param transactionId id de transaccion
+     * @param numCuenta numero de cuenta
+     * @param fechaInicio fecha de inicio para búsqueda
+     * @param fechaFin fecha de fin par abúsqueda
+     * @param request datos de la peticion
+     * @return {@link Map} datos con los movimientos de la cuenta solicitada
      */
-    @GetMapping("/transacciones/{numCuenta}/{transactionId}")
+    @PostMapping("/transacciones/{numCuenta}/{transactionId}")
     public ResponseEntity<Map<String, Object>> obtenerTransacciones(@PathVariable String transactionId,
                                                                     @PathVariable String numCuenta,
                                                                     @RequestParam String fechaInicio,
@@ -120,31 +133,25 @@ public class BCPController {
 
         log.info("Solicitud transacciones BCP recibida, transactionId: {}", transactionId);
 
+        String clientIp = ResponseGeneric.getClientIp(request);
+        String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+        Session session = validationService.validateSession(transactionId);
+
+        RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_OBTENER_MOV_BCP, userAgent);
+
         try {
-            // Validar sesión
-            Session session = validationService.validateSession(transactionId);
+            Map<String, Object> resp = bcpEmpresaService.obtenerMovimientos(transactionId, numCuenta, fechaInicio, fechaFin);
 
-            // Obtener transacciones
-            //String transacciones = bcpService.obtenerTransacciones(fechaInicio, fechaFin);
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
-            String clientIp = ResponseGeneric.getClientIp(request);
-            String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+            log.info("Movimientos BCP obtenido exitosamente, transactionId: {}", transactionId);
 
-            String requestData = String.format("FECHAS=%s-%s", fechaInicio, fechaFin);
-            loggingService.logCompleteRequest(session, clientIp, requestData,Constantes.RESP_REQUEST_EXITO, "0",userAgent, 0);
-
-            Map<String, Object> response = ResponseGeneric.buildSuccessResponse(transactionId, "Se obtiene movimientos correctamente", true);
-            response.put("transacciones", "transacciones");
-            response.put("fecha_inicio", fechaInicio);
-            response.put("fecha_fin", fechaFin);
-
-            log.info("Transacciones BCP obtenidas exitosamente, transactionId: {}", transactionId);
-
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(resp);
 
         } catch (Exception e) {
-            log.error("Error obteniendo transacciones BCP: {}", e.getMessage());
+            log.error("Error obteniendo movimietnos BCP: {}", e.getMessage());
 
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
             Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
             return ResponseEntity.badRequest().body(errorResponse);
@@ -156,7 +163,7 @@ public class BCPController {
      *
      * @param transactionId id de transaccion
      * @param request datos de la peticion
-     * @return {@link Map}
+     * @return {@link Map} respuesta de logout
      */
     @PostMapping("/logout/{transactionId}")
     public ResponseEntity<Map<String, Object>> logout(@PathVariable String transactionId,
@@ -171,7 +178,7 @@ public class BCPController {
         RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_LOGOUT_BCP, userAgent);
 
         try {
-            Map<String, Object> response = bcpService.logout(transactionId);
+            Map<String, Object> response = bcpEmpresaService.logout(transactionId);
 
             loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 

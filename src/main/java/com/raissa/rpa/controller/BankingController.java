@@ -2,10 +2,9 @@ package com.raissa.rpa.controller;
 
 import com.raissa.rpa.domain.dto.AccountRegistrationRequest;
 import com.raissa.rpa.domain.entity.Account;
-import com.raissa.rpa.service.AuthService;
+import com.raissa.rpa.service.commons.AuthService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.ResponseGeneric;
-import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;

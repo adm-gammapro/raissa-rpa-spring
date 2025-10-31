@@ -1,9 +1,10 @@
-package com.raissa.rpa.service.impl;
+package com.raissa.rpa.service.impl.bcp;
 
 import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.SessionNotFoundException;
-import com.raissa.rpa.service.BCPService;
+import com.raissa.rpa.service.bcp.BCPEmpresaService;
 import com.raissa.rpa.util.Constantes;
+import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import com.twocaptcha.TwoCaptcha;
 import com.twocaptcha.captcha.Normal;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,7 +42,7 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class BCPServiceImpl implements BCPService {
+public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     @Value("${banking.bcp.url}")
     private String bcpUrl;
 
@@ -72,20 +74,36 @@ public class BCPServiceImpl implements BCPService {
         try {
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--no-sandbox");
-            options.addArguments("--disable-web-security");
-            options.addArguments("--disable-features=IsolateOrigins,site-per-process");
             options.addArguments("--window-size=1400,1000");
 
+            // Disimula automatización
+            options.addArguments("--disable-blink-features=AutomationControlled");
+            options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
+            options.setExperimentalOption("useAutomationExtension", false);
+
+            // User-Agent realista
+            options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+
+            // crea otro perfil
+            options.addArguments("--profile-directory=Default");
+
             if (isProduction) {
-                options.addArguments("--headless");
+                options.addArguments("--headless=new");
+                options.addArguments("--disable-gpu");
+                options.addArguments("--no-sandbox");
+                options.addArguments("--font-render-hinting=medium");
+                options.addArguments("--disable-dev-shm-usage");
             }
+
+            options.addArguments("--lang=es-PE");
 
             driver = new ChromeDriver(options);
             driver.get(bcpUrl);
 
             log.info("Navegando a: {}", bcpUrl);
 
-            Thread.sleep(5000);
+            MetodsGeneric.randomWait(2000, 3000);
 
             // 1. ✅ Ingresar código de usuario
             enterUserCode(driver, credentials.get("codigoUsuario"));
@@ -99,16 +117,18 @@ public class BCPServiceImpl implements BCPService {
             }
 
             enterPassword(driver, claveAcceso);
-            Thread.sleep(1000);
+            MetodsGeneric.randomWait(300, 500);
 
             // 3. ✅ MANEJAR CAPTCHA
             handleCaptcha(driver);
-            Thread.sleep(1000);
 
             // 4. ✅ CLICK EN BOTÓN LOGIN
             clickLoginButton(driver);
 
-            // 5. ✅ VERIFICAR LOGIN EXITOSO
+            // 5. ✅ Manejar el modal móvil si está abierto
+            handleMobileModal(driver);
+
+            // 6. ✅ VERIFICAR LOGIN EXITOSO
             boolean loginSuccess = verifyLoginSuccess(driver);
 
             if (!loginSuccess) {
@@ -149,6 +169,105 @@ public class BCPServiceImpl implements BCPService {
                     log.warn("Error al cerrar driver: {}", e.getMessage());
                 }
             }
+        }
+    }
+
+    public Map<String, Object> obtenerSaldo(String transactionId) {
+        Map<String, Object> result;
+        log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
+
+        try {
+            WebDriver driver = driverCache.get(transactionId);
+
+            if (driver == null) {
+                throw new SessionNotFoundException("Sesión no encontrada");
+            }
+
+            if (!isOnAccountsPage(driver)) {
+                throw new BcpException("No se pudo navegar a cuentas",
+                        "BCP_NAVIGATION_ERROR",
+                        "No se pudo acceder a la sección de cuentas");
+            }
+
+            // 1. ✅ Hacer clic en el tab "Cuentas"
+            clickAccountsTab(driver);
+
+            // 2. ✅ Esperar a que carguen los datos
+            waitForAccountsToLoad(driver);
+
+            // 3. ✅ Extraer datos de las cuentas
+            List<Map<String, Object>> accounts = extractAccountsData(driver);
+
+            // 4. ✅ Retornar resultados
+            result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
+            result.put("data", accounts);
+            result.put("count", accounts.size());
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Error obteniendo saldo BCP: {}", e.getMessage());
+
+            return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
+        }
+    }
+
+    public Map<String, Object> obtenerMovimientos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin) {
+        Map<String, Object> result;
+        log.info("Obteniendo movimientos BCP, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
+                transactionId, numeroCuenta, fechaInicio, fechaFin);
+
+        try {
+            WebDriver driver = driverCache.get(transactionId);
+
+            if (driver == null) {
+                throw new SessionNotFoundException("Sesión no encontrada");
+            }
+
+            // 1. ✅ Navegar a la opción "Resumen" del menú lateral
+            if (!navigateToResumen(driver)) {
+                throw new BcpException("No se pudo navegar a resumen",
+                        "BCP_NAVIGATION_ERROR",
+                        "No se pudo acceder a la sección de resumen");
+            }
+
+            // 2. ✅ Esperar a que cargue la página de resumen
+            waitForResumenAccountsToLoad(driver);
+
+            // 3. ✅ Seleccionar la cuenta específica
+            if (!selectCuenta(driver, numeroCuenta)) {
+                throw new BcpException("No se pudo seleccionar la cuenta",
+                        "BCP_ACCOUNT_NOT_FOUND",
+                        "La cuenta " + numeroCuenta + " no fue encontrada");
+            }
+
+            // 4. ✅ Configurar rango de fechas
+            if (!setDateRange(driver, fechaInicio, fechaFin)) {
+                throw new BcpException("No se pudo configurar el rango de fechas",
+                        "BCP_DATE_RANGE_ERROR",
+                        "Error al establecer fechas: " + fechaInicio + " - " + fechaFin);
+            }
+
+            // 5. ✅ Aplicar filtros y esperar resultados
+            applyFilters(driver);
+            waitForMovimientosToLoad(driver);
+
+            // 6. ✅ Extraer datos de movimientos
+            List<Map<String, Object>> movimientos = extractMovimientosData(driver);
+
+            // 7. ✅ Retornar resultados
+            result = ResponseGeneric.buildSuccessResponse(transactionId, "Movimientos obtenidos exitosamente", true);
+            result.put("data", movimientos);
+            result.put("count", movimientos.size());
+            result.put("cuenta", numeroCuenta);
+            result.put("fechaInicio", fechaInicio);
+            result.put("fechaFin", fechaFin);
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("Error obteniendo movimientos BCP: {}", e.getMessage());
+            return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
 
@@ -198,46 +317,6 @@ public class BCPServiceImpl implements BCPService {
         return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
     }
 
-    public Map<String, Object> obtenerSaldo(String transactionId) {
-        Map<String, Object> result;
-        log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
-
-        try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
-
-            if (!isOnAccountsPage(driver)) {
-                throw new BcpException("No se pudo navegar a cuentas",
-                        "BCP_NAVIGATION_ERROR",
-                        "No se pudo acceder a la sección de cuentas");
-            }
-
-            // 2. ✅ Hacer clic en el tab "Cuentas"
-            clickAccountsTab(driver);
-
-            // 3. ✅ Esperar a que carguen los datos
-            waitForAccountsToLoad(driver);
-
-            // 4. ✅ Extraer datos de las cuentas
-            List<Map<String, Object>> accounts = extractAccountsData(driver);
-
-            // 5. ✅ Retornar resultados
-            result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
-            result.put("data", accounts);
-            result.put("count", accounts.size());
-
-            return result;
-
-        } catch (Exception e) {
-            log.error("Error obteniendo saldo BCP: {}", e.getMessage());
-
-            return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
-        }
-    }
-
     /**
      * Ingresa el código del usuario en este caso número de tarjeta
      *
@@ -251,13 +330,13 @@ public class BCPServiceImpl implements BCPService {
             WebElement inputLogin = waitForElement(driver, By.cssSelector("input[name='ciam-input-card']"));
 
             inputLogin.clear();
-            inputLogin.sendKeys(userCode);
+            MetodsGeneric.humanTypeText(inputLogin, userCode);
 
             Actions actions = new Actions(driver);
             actions.sendKeys(Keys.TAB).perform();
-            Thread.sleep(500);
+            MetodsGeneric.randomWait(300, 500);
             actions.sendKeys(Keys.TAB).perform();
-            Thread.sleep(1000);
+            MetodsGeneric.randomWait(300, 500);
 
             log.info("Usuario ingresado y tabs aplicados");
 
@@ -501,7 +580,7 @@ public class BCPServiceImpl implements BCPService {
             key.click();
             log.debug("Click en tecla índice: {}", keyIndex);
 
-            Thread.sleep(500);
+            MetodsGeneric.randomWait(300, 500);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -534,9 +613,6 @@ public class BCPServiceImpl implements BCPService {
             // 3. Ingresar la solución
             enterCaptchaSolution(driver, captchaSolution);
 
-            // 4. Esperar validación
-            Thread.sleep(2000);
-
             // 5. Verificar si el captcha fue aceptado
             if (!isCaptchaAccepted(driver)) {
                 throw new BcpException("Solución de captcha rechazada",
@@ -546,11 +622,6 @@ public class BCPServiceImpl implements BCPService {
 
             log.info("Captcha manejado exitosamente");
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error manejando captcha: {}", e.getMessage());
             throw new BcpException("Error inesperado manejando captcha",
@@ -732,7 +803,7 @@ public class BCPServiceImpl implements BCPService {
         log.info("Ingresando solución del captcha: {}", solution);
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
             WebElement captchaInput = wait.until(
                     ExpectedConditions.visibilityOfElementLocated(
@@ -741,11 +812,11 @@ public class BCPServiceImpl implements BCPService {
             );
 
             captchaInput.clear();
-            captchaInput.sendKeys(solution);
+            MetodsGeneric.humanTypeText(captchaInput, solution);
 
             Actions actions = new Actions(driver);
             actions.sendKeys(Keys.TAB).perform();
-            Thread.sleep(500);
+            MetodsGeneric.randomWait(500, 800);
 
             log.info("Solución del captcha ingresada exitosamente");
 
@@ -770,7 +841,7 @@ public class BCPServiceImpl implements BCPService {
      */
     private boolean isCaptchaAccepted(WebDriver driver) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(3));
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
 
             boolean hasError = wait.until(driverVal ->
                     driverVal.findElements(
@@ -803,7 +874,7 @@ public class BCPServiceImpl implements BCPService {
             loginButton.click();
             log.info("Click en botón de login realizado");
 
-            Thread.sleep(3000);
+            MetodsGeneric.randomWait(2500, 3500);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -965,7 +1036,7 @@ public class BCPServiceImpl implements BCPService {
 
     /**
      * Verifica si el dashboard se cargó
-     * @param driver maenjador de página
+     * @param driver manejador de página
      * @param selector elemento html
      * @return {@link boolean}
      */
@@ -1063,40 +1134,6 @@ public class BCPServiceImpl implements BCPService {
                 "El proceso fue interrumpido durante la navegación");
     }
 
-
-
-
-
-
-
-
-
-
-
-
-    /**
-     * Obtener transacciones por periodo
-     */
-    /*public String obtenerTransacciones(String fechaInicio, String fechaFin) {
-        try {
-            log.info("Obteniendo transacciones BCP desde {} hasta {}", fechaInicio, fechaFin);
-
-            // TODO: Implementar navegación a sección de transacciones
-            // y filtrado por fechas
-
-            wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(TRANSACCIONES_SELECTOR)));
-            WebElement transaccionesElement = driver.findElement(By.cssSelector(TRANSACCIONES_SELECTOR));
-            String transacciones = transaccionesElement.getText();
-
-            log.info("Transacciones BCP obtenidas");
-            return transacciones;
-
-        } catch (Exception e) {
-            log.error("Error obteniendo transacciones BCP: {}", e.getMessage());
-            return "Error: " + e.getMessage();
-        }
-    }*/
-
     /**
      * Abre el desplegable para cerrar sesion
      *
@@ -1119,7 +1156,9 @@ public class BCPServiceImpl implements BCPService {
             };
 
             for (String selector : dropdownSelectors) {
-                abreProfileDropdown(driver, selector);
+                if(abreProfileDropdown(driver, selector)){
+                    break;
+                }
             }
         } catch (Exception e) {
             log.warn("No se pudo abrir el dropdown de perfil: {}", e.getMessage());
@@ -1131,19 +1170,22 @@ public class BCPServiceImpl implements BCPService {
      * @param driver manejador de página
      * @param selector elemento html
      */
-    private void abreProfileDropdown(WebDriver driver,
-                                     String selector) {
+    private boolean abreProfileDropdown(WebDriver driver,
+                                        String selector) {
         try {
             WebElement dropdown = driver.findElement(By.cssSelector(selector));
             if (dropdown.isDisplayed()) {
                 dropdown.click();
                 log.debug("Dropdown de perfil abierto con selector: {}", selector);
-                Thread.sleep(2000);
+                Thread.sleep(500);
+                return true;
             }
+            return false;
         } catch (InterruptedException e) {
             handleInterruptedException(e);
-
             log.error("Selector {} no funcionó al intentar abrir perfil: {}", selector, e.getMessage());
+
+            return false;
         }
     }
 
@@ -1173,8 +1215,6 @@ public class BCPServiceImpl implements BCPService {
                     break;
                 }
             }
-
-            throw new NoSuchElementException("No se pudo encontrar el botón de cerrar sesión en el footer");
 
         } catch (Exception e) {
             log.error("Error haciendo click en logout: {}", e.getMessage());
@@ -1303,29 +1343,32 @@ public class BCPServiceImpl implements BCPService {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
             for (String selector : npsSelectors) {
-                buscaEncuesta(driver, wait, selector);
+                if(buscaEncuesta(driver, wait, selector)){
+                    break;
+                }
             }
-
-            log.debug("No se detectó encuesta NPS");
-
         } catch (Exception e) {
             log.warn("Error manejando encuesta NPS: {}", e.getMessage());
         }
     }
 
-    private void buscaEncuesta(WebDriver driver,
-                               WebDriverWait wait,
-                               String selector) {
+    private boolean buscaEncuesta(WebDriver driver,
+                                  WebDriverWait wait,
+                                  String selector) {
         try {
             WebElement survey = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
             if (survey.isDisplayed()) {
                 log.debug("Encuesta NPS detectada, cerrando...");
                 closeNpsSurvey(driver);
+                return true;
             }
+            return false;
         } catch (TimeoutException e) {
             log.error("Tiempo de espera sobrepasado");
+            return false;
         } catch (Exception e) {
             log.error("Error verificando encuesta con selector {}: {}", selector, e.getMessage());
+            return false;
         }
     }
 
@@ -1467,6 +1510,65 @@ public class BCPServiceImpl implements BCPService {
     }
 
     /**
+     * Metodo para detectar y cerrar el modal móvil si está abierto
+     *
+     * @param driver manejador de pagina
+     */
+    private void handleMobileModal(WebDriver driver) {
+        try {
+            // Esperar un momento para que el DOM se estabilice
+            MetodsGeneric.randomWait(1000, 1500);
+
+            // Verificar si el modal está presente y visible
+            List<WebElement> modals = driver.findElements(By.cssSelector("bcp-mobile-modal .bcp-modal-host-4-25-0.show"));
+
+            if (!modals.isEmpty() && modals.get(0).isDisplayed()) {
+                log.info("Modal móvil detectado, intentando cerrarlo...");
+
+                // Intentar localizar el botón de cerrar con diferentes selectores
+                WebElement closeButton = null;
+
+                // Primero intentar con el selector más específico
+                try {
+                    closeButton = driver.findElement(By.cssSelector("#bcp-modal-2 .close-button"));
+                } catch (NoSuchElementException e) {
+                    // Si falla, intentar con selector más genérico
+                    try {
+                        closeButton = driver.findElement(By.cssSelector(".bcp-ffw-modal-header-close .close-button"));
+                    } catch (NoSuchElementException e2) {
+                        // Último intento con selector más simple
+                        closeButton = driver.findElement(By.cssSelector(".close-button"));
+                    }
+                }
+
+                // Verificar que el botón esté visible y habilitado
+                if (closeButton != null && closeButton.isDisplayed() && closeButton.isEnabled()) {
+                    // Hacer clic en el botón de cerrar
+                    closeButton.click();
+                    log.info("Modal cerrado exitosamente");
+
+                    // Esperar a que el modal desaparezca
+                    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(2));
+                    wait.until(ExpectedConditions.invisibilityOfElementLocated(
+                            By.cssSelector("bcp-mobile-modal .bcp-modal-host-4-25-0.show")));
+
+                } else {
+                    log.warn("Botón de cerrar no está disponible para hacer clic");
+                }
+            } else {
+                log.info("No se detectó modal móvil abierto");
+            }
+
+        } catch (NoSuchElementException e) {
+            log.info("No se encontró el modal móvil: {}", e.getMessage());
+        } catch (TimeoutException e) {
+            log.warn("Timeout esperando a que el modal se cierre: {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error manejando el modal móvil: {}", e.getMessage());
+        }
+    }
+
+    /**
      * Selecciona tab de cuentas
      *
      * @param driver manejador de página
@@ -1578,18 +1680,42 @@ public class BCPServiceImpl implements BCPService {
             log.debug("Esperando a que carguen los datos de cuentas...");
 
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
             wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector(".account-balance, bcp-account, [data-account-number]")
+                    By.xpath("//bcp-title-9nbaaa//h1[normalize-space()='Cuentas']")
             ));
 
             Thread.sleep(500);
-
         } catch (InterruptedException e) {
             handleInterruptedException(e);
             log.debug("Interrupción al esperar que carguen datos de cuenta {}", e.getMessage());
         } catch (Exception e) {
             log.warn("Error esperando carga de cuentas: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Espera a que cargue la interfaz de resumen de cuentas
+     *
+     * @param driver manejador de página
+     */
+    private void waitForResumenAccountsToLoad(WebDriver driver) {
+        try {
+            log.debug("Esperando a que carguen los datos de resumen de cuentas...");
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.xpath("//bcp-title-9nbaaa//h1[normalize-space()='Resumen de cuentas']")
+            ));
+            Thread.sleep(500);
+
+            WebElement cuentasOption = driver.findElement(By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']"));
+            cuentasOption.click();
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            handleInterruptedException(e);
+            log.debug("Interrupción al esperar que carguen datos de resumen de cuenta {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error esperando carga de resumen de cuentas: {}", e.getMessage());
         }
     }
 
@@ -1618,15 +1744,16 @@ public class BCPServiceImpl implements BCPService {
 
             for (WebElement row : accountRows) {
                 Map<String, Object> accountData = extractAccountFromRow(row);
-                accounts.add(accountData);
-                log.debug("Cuenta extraída: {}", accountData.get(Constantes.KEY_NUMERO_CUENTA));
+                if (!accountData.isEmpty()) {
+                    accounts.add(accountData);
+                    log.debug("Cuenta extraída: {}", accountData.get(Constantes.KEY_NUMERO_CUENTA));
+                }
             }
 
             return accounts;
 
         } catch (Exception e) {
             log.error("Error extrayendo datos de cuentas: {}", e.getMessage());
-            accounts.add(createMockAccountData());
             return accounts;
         }
     }
@@ -1645,7 +1772,7 @@ public class BCPServiceImpl implements BCPService {
                     ".//bcp-paragraph-9nbaaa[@size='sm' and @color='text' and @family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
             ));
             String numeroCuenta = numeroCuentaElement.getText().trim();
-            numeroCuenta = cleanAccountNumber(numeroCuenta);
+            numeroCuenta = MetodsGeneric.cleanAccountNumber(numeroCuenta);
             account.put(Constantes.KEY_NUMERO_CUENTA, numeroCuenta);
 
             // 2. Moneda
@@ -1660,7 +1787,7 @@ public class BCPServiceImpl implements BCPService {
                     ".//bcp-table-col-9nbaaa[@index='4']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
             ));
             String saldoDisponibleStr = saldoDisponibleElement.getText().trim();
-            double saldoDisponible = parseSaldo(saldoDisponibleStr);
+            double saldoDisponible = MetodsGeneric.parseSaldo(saldoDisponibleStr);
             account.put(Constantes.KEY_SALDO_DISP, saldoDisponible);
 
             // 4. Saldo contable
@@ -1668,62 +1795,370 @@ public class BCPServiceImpl implements BCPService {
                     ".//bcp-table-col-9nbaaa[@index='6']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
             ));
             String saldoContableStr = saldoContableElement.getText().trim();
-            double saldoContable = parseSaldo(saldoContableStr);
+            double saldoContable = MetodsGeneric.parseSaldo(saldoContableStr);
             account.put(Constantes.KEY_SALDO_CONT, saldoContable);
 
             return account;
 
         } catch (Exception e) {
             log.error("Error extrayendo datos de fila: {}", e.getMessage());
-            return createMockAccountData();
+            return Collections.emptyMap();
         }
     }
 
     /**
-     * Formatea el monto mostrado en la pagina a numero
-     * @param saldoStr Saldo en texto
-     * @return {@link double} saldo en formato numerico
+     * Hacer clic en la opción "Resumen" del menú lateral
+     *
+     * @param driver manejador de página
+     * @return {@link boolean}
      */
-    private double parseSaldo(String saldoStr) {
+    private boolean navigateToResumen(WebDriver driver) {
         try {
-            String cleaned = saldoStr.replace("S/ ", "")
-                    .replace("$ ", "")
-                    .replace(",", "")
-                    .trim();
+            WebElement cuentasOption = driver.findElement(By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']"));
+            cuentasOption.click();
 
-            return Double.parseDouble(cleaned);
+            Thread.sleep(200);
+
+            WebElement resumenOption = driver.findElement(By.xpath("//div[@class='ms-child']//p[normalize-space()='Resumen de Cuentas']"));
+            resumenOption.click();
+
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
-            log.warn("Error parseando saldo '{}': {}", saldoStr, e.getMessage());
-            return 0.0;
+            log.warn("Error navegando a resumen: {}", e.getMessage());
+            return false;
         }
     }
 
     /**
-     * Crea un mock para una cuenta vacia
-     * @return {@link List<Map>} lista vacia
+     * Se ubica en una cuenta especifica de la lista de cuentas disponibles
+     * @param driver manejador de página
+     * @param numeroCuenta numero de cuenta
+     * @return {@link boolean}
      */
-    private Map<String, Object> createMockAccountData() {
-        Map<String, Object> account = new HashMap<>();
-        account.put("numeroCuenta", "");
-        account.put("moneda", "");
-        account.put("saldoDisponible", "0.00");
-        account.put("saldoContable", "0.00");
+    private boolean selectCuenta(WebDriver driver, String numeroCuenta) {
+        try {
 
-        log.debug("Datos mock generados: 1 cuenta");
-        return account;
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            if(seleccionarTabCuentasXpath(wait)) {
+                wait.until(ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-table-row-9nbaaa[contains(@index, '" + numeroCuenta + "')]")
+                ));
+
+                WebElement botonMovimientos = wait.until(ExpectedConditions.elementToBeClickable(
+                        By.xpath(".//bcp-icon-9nbaaa[@name='clock-b']")
+                ));
+
+                ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", botonMovimientos);
+                Thread.sleep(500);
+
+                botonMovimientos.click();
+
+                wait.until(ExpectedConditions.or(
+                        ExpectedConditions.urlContains("movimientos"),
+                        ExpectedConditions.urlContains("historico"),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//*[contains(text(), 'Movimientos') or contains(text(), 'Histórico')]")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//bcp-datepicker-range-bpbaaa[@id-auto='range-movements']")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//bcp-input-bpbaaa[@name='inputDateFrom']")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//bcp-input-bpbaaa[@name='inputDateTo']")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//bcp-select-bpbaaa[@id-auto='historical-movement-type']")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']")
+                        ),
+                        ExpectedConditions.visibilityOfElementLocated(
+                                By.xpath("//*[contains(@class, 'historical-movements__filters')]")
+                        )
+                ));
+
+                return true;
+            }
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
+        } catch (Exception e) {
+            log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
+            return false;
+        }
     }
 
-    /**
-     * Quitar caracteres especiales del número de cuenta
-     * @param rawAccountNumber numero de cuenta
-     * @return {@link String} numero de cuenta sin caracteres especiales
-     */
-    private String cleanAccountNumber(String rawAccountNumber) {
-        if (rawAccountNumber == null || rawAccountNumber.isEmpty()) {
+    private boolean setDateRange(WebDriver driver, String fechaInicio, String fechaFin) {
+        log.info("Iniciando carga de rango de fechas");
+        try {
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            wait.until(ExpectedConditions.visibilityOfElementLocated(
+                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateFrom']")
+            ));
+
+            WebElement fechaInicioInput = driver.findElement(
+                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateFrom']")
+            );
+
+            WebElement fechaFinInput = driver.findElement(
+                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateTo']")
+            );
+
+            // Establecer valores directamente con JavaScript
+            ((JavascriptExecutor) driver).executeScript("arguments[0].value = arguments[1];", fechaInicioInput, fechaInicio);
+            ((JavascriptExecutor) driver).executeScript("arguments[0].value = arguments[1];", fechaFinInput, fechaFin);
+
+            // Disparar eventos para que se registren los cambios
+            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", fechaInicioInput);
+            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", fechaInicioInput);
+            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", fechaFinInput);
+            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", fechaFinInput);
+
+            Thread.sleep(500);
+
+            return true;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
+        } catch (Exception e) {
+            log.warn("Error configurando rango de fechas {} - {}: {}", fechaInicio, fechaFin, e.getMessage());
+            return false;
+        }
+    }
+
+    private void applyFilters(WebDriver driver) {
+        try {
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+
+            wait.until(ExpectedConditions.elementToBeClickable(
+                    By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']//button")
+            ));
+
+            WebElement buscarBtn = driver.findElement(
+                    By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']//button")
+            );
+
+            if (!buscarBtn.isEnabled()) {
+                log.warn("El botón de búsqueda está deshabilitado, verificando validaciones...");
+
+                driver.findElement(By.tagName("body")).click();
+                Thread.sleep(1000);
+
+                if (!buscarBtn.isEnabled()) {
+                    throw new BcpException("Botón de búsqueda permanece deshabilitado después de ingresar fechas");
+                }
+            }
+
+            buscarBtn.click();
+
+            log.info("Búsqueda de movimientos ejecutada exitosamente");
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
+        } catch (Exception e) {
+            log.warn("Error aplicando filtros de búsqueda: {}", e.getMessage());
+            throw new BcpException("No se pudo ejecutar la búsqueda");
+        }
+    }
+
+    private void waitForMovimientosToLoad(WebDriver driver) {
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-data-table-bpbaaa[contains(@class, 'bcp-data-table-host')]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-table-row-bpbaaa[@index]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-character-bpbaaa[contains(., 'FECHA')]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-character-bpbaaa[contains(., 'DESCRIPCIÓN')]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//bcp-character-bpbaaa[contains(., 'MONTO')]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//*[contains(text(), 'No se encontraron resultados') or contains(text(), 'sin resultados')]")
+                )
+        ));
+
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private boolean hasMovimientosResults(WebDriver driver) {
+        try {
+            List<WebElement> filasResultados = driver.findElements(
+                    By.xpath("//bcp-table-row-bpbaaa[@index and not(contains(@class, 'header'))]")
+            );
+
+            List<WebElement> mensajeSinResultados = driver.findElements(
+                    By.xpath("//*[contains(text(), 'No se encontraron resultados') or contains(text(), 'sin resultados')]")
+            );
+
+            if (!filasResultados.isEmpty()) {
+                log.info("Se encontraron {} movimientos", filasResultados.size());
+                return true;
+            }
+
+            if (!mensajeSinResultados.isEmpty()) {
+                log.info("No se encontraron movimientos para el rango de fechas especificado");
+                return false;
+            }
+
+            return false;
+        } catch (Exception e) {
+            log.warn("Error verificando resultados de movimientos: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private List<Map<String, Object>> extractMovimientosData(WebDriver driver) {
+        List<Map<String, Object>> movimientos = new ArrayList<>();
+
+        try {
+            if (!hasMovimientosResults(driver)) {
+                log.info("No se encontraron movimientos");
+                return movimientos;
+            }
+
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("bcp-data-table-bpbaaa")));
+
+            int totalPages = getTotalPages(driver);
+
+            extractPageData(driver, movimientos);
+
+            if (totalPages > 1) {
+                for (int currentPage = 2; currentPage <= totalPages; currentPage++) {
+                    navigateToPage(driver, currentPage);
+                    wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("bcp-data-table-bpbaaa")));
+
+                    extractPageData(driver, movimientos);
+                }
+            }
+
+        } catch (Exception e) {
+            log.warn("Error extrayendo datos de movimientos: {}", e.getMessage());
+        }
+
+        return movimientos;
+    }
+
+    private int getTotalPages(WebDriver driver) {
+        try {
+            WebElement pagination = driver.findElement(By.cssSelector("bcp-pagination-bpbaaa"));
+            List<WebElement> pageItems = pagination.findElements(By.cssSelector("li.page"));
+            return pageItems.size();
+        } catch (Exception e) {
+            log.debug("No se encontró paginación, asumiendo 1 página");
+            return 1;
+        }
+    }
+
+    private void navigateToPage(WebDriver driver, int pageNumber) {
+        try {
+            WebElement pageLink = driver.findElement(By.xpath("//li[@class='page' and contains(., '" + pageNumber + "')]"));
+            pageLink.click();
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
+        } catch (Exception e) {
+            log.warn("Error navegando a página {}: {}", pageNumber, e.getMessage());
+        }
+    }
+
+    private void extractPageData(WebDriver driver, List<Map<String, Object>> movimientos) {
+        try {
+            List<WebElement> filas = driver.findElements(By.cssSelector("bcp-table-row-bpbaaa[index]"));
+
+            for (WebElement fila : filas) {
+                try {
+                    List<WebElement> columnas = fila.findElements(By.cssSelector("bcp-table-col-bpbaaa"));
+
+                    if (columnas.size() >= 6) {
+                        Map<String, Object> movimiento = new HashMap<>();
+
+                        // Fecha
+                        movimiento.put("fecha", getColumnText(columnas.get(0)));
+
+                        // Fecha Valuta
+                        movimiento.put("fecha_valor", getColumnText(columnas.get(1)));
+
+                        // Descripción
+                        movimiento.put("descripcion", getColumnText(columnas.get(2)));
+
+                        // Número de operación
+                        movimiento.put("operacion", getColumnText(columnas.get(3)));
+
+                        // Monto (puede ser positivo o negativo)
+                        String montoText = getColumnText(columnas.get(4));
+                        double monto = MetodsGeneric.parseSaldo(montoText);
+                        movimiento.put("monto", monto);
+
+                        // Determinar si es débito o crédito
+                        if (montoText.contains("-")) {
+                            movimiento.put("tipo", "DEBITO");
+                        } else {
+                            movimiento.put("tipo", "CREDITO");
+                        }
+
+                        // Saldo
+                        String saldoText = getColumnText(columnas.get(4));
+                        double saldo = MetodsGeneric.parseSaldo(saldoText);
+                        movimiento.put("saldo", saldo);
+
+                        //Referencia
+                        movimiento.put("referencia", "-");
+
+                        movimientos.add(movimiento);
+                    }
+                } catch (Exception e) {
+                    log.warn("Error procesando fila: {}", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Error extrayendo datos de página: {}", e.getMessage());
+        }
+    }
+
+    private String getColumnText(WebElement columna) {
+        try {
+            List<WebElement> paragraphs = columna.findElements(By.cssSelector("bcp-paragraph-bpbaaa"));
+            if (!paragraphs.isEmpty()) {
+                return paragraphs.get(0).getText().trim();
+            }
+
+            return columna.getText().trim();
+        } catch (Exception e) {
             return "";
         }
-
-        // Quitar espacios, guiones, puntos, y otros caracteres no numéricos
-        return rawAccountNumber.replaceAll("[\\s\\-._]+", "");
     }
 }

@@ -21,9 +21,32 @@ public class Constantes {
     public static final String TIPO_REQUEST_LOGIN_BCP = "LOGIN_BCP";
     public static final String TIPO_REQUEST_LOGOUT_BCP = "LOGOUT_BCP";
     public static final String TIPO_REQUEST_OBTENER_SALDO_BCP = "OBTENER_SALDO_BCP";
+    public static final String TIPO_REQUEST_OBTENER_MOV_BCP = "OBTENER_MOV_BCP";
     public static final String KEY_USER_AGENT = "User-Agent";
     public static final String KEY_NUMERO_CUENTA = "numeroCuenta";
+    public static final String KEY_REFERENCIA = "referencia";
+    public static final String KEY_OPERACION = "operacion";
+    public static final String KEY_MONTO = "monto";
+    public static final String KEY_SALDO = "saldo";
+    public static final String KEY_TIPO = "tipo";
+    public static final String KEY_FECHA_VALOR = "fechaValor";
+    public static final String KEY_FECHA = "fecha";
+    public static final String KEY_DESCRIPCION = "descripcion";
+    public static final String KEY_FECHA_HORA = "fechaHoraOperacion";
     public static final String KEY_MONEDA = "moneda";
+    public static final String KEY_TIPO_CUENTA = "tipoCuenta";
     public static final String KEY_SALDO_DISP = "saldoDisponible";
     public static final String KEY_SALDO_CONT = "saldoContable";
+
+    public static final String VALOR_DEBITO = "DEBITO";
+    public static final String VALOR_CREDITO = "CREDITO";
+    public static final String VALOR_CEROS = "0000000000";
+
+    public static final String TIPO_REQUEST_LOGIN_BBVA = "LOGIN_BBVA";
+    public static final String TIPO_REQUEST_LOGOUT_BBVA = "LOGOUT_BBVA";
+    public static final String TIPO_REQUEST_OBTENER_SALDO_BBVA = "OBTENER_SALDO_BBVA";
+    public static final String TIPO_REQUEST_OBTENER_MOV_BBVA = "OBTENER_MOV_BBVA";
+
+    public static final String KEY_DATA = "data";
+    public static final String KEY_COUNT = "count";
 }

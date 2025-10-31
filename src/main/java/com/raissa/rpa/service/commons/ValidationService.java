@@ -1,4 +1,4 @@
-package com.raissa.rpa.service;
+package com.raissa.rpa.service.commons;
 
 import com.raissa.rpa.domain.entity.Account;
 import com.raissa.rpa.domain.entity.Session;

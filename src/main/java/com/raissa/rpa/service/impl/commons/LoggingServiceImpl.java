@@ -1,9 +1,9 @@
-package com.raissa.rpa.service.impl;
+package com.raissa.rpa.service.impl.commons;
 
 import com.raissa.rpa.domain.entity.RequestInformation;
 import com.raissa.rpa.domain.entity.Session;
 import com.raissa.rpa.domain.repository.RequestInformationRepository;
-import com.raissa.rpa.service.LoggingService;
+import com.raissa.rpa.service.commons.LoggingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,8 +39,6 @@ public class LoggingServiceImpl implements LoggingService {
     public void updateResponseStatus(Long requestId,
                                      String responseStatus) {
         log.info("Actualizando respuesta para request: {} - Status: {}", requestId, responseStatus);
-
-
 
         requestInformationRepository.findById(requestId).ifPresent(request -> {
             LocalDateTime createdAt = request.getCreatedAt();

@@ -1,4 +1,4 @@
-package com.raissa.rpa.service.impl;
+package com.raissa.rpa.service.impl.commons;
 
 import com.raissa.rpa.domain.dto.AccountRegistrationRequest;
 import com.raissa.rpa.domain.entity.Account;
@@ -6,8 +6,8 @@ import com.raissa.rpa.domain.entity.Session;
 import com.raissa.rpa.domain.repository.AccountRepository;
 import com.raissa.rpa.domain.repository.SessionRepository;
 import com.raissa.rpa.exception.SessionNotFoundException;
-import com.raissa.rpa.service.AuthService;
-import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.service.commons.AuthService;
+import com.raissa.rpa.service.commons.ValidationService;
 import io.jsonwebtoken.Jwts;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;

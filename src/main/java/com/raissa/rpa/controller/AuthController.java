@@ -2,9 +2,9 @@ package com.raissa.rpa.controller;
 
 import com.raissa.rpa.domain.entity.Account;
 import com.raissa.rpa.domain.entity.Session;
-import com.raissa.rpa.service.AuthService;
-import com.raissa.rpa.service.LoggingService;
-import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.service.commons.AuthService;
+import com.raissa.rpa.service.commons.LoggingService;
+import com.raissa.rpa.service.commons.ValidationService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.ResponseGeneric;
 import jakarta.servlet.http.HttpServletRequest;

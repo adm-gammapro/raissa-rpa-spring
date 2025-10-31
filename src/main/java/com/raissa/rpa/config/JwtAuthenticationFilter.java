@@ -1,7 +1,7 @@
 package com.raissa.rpa.config;
 
-import com.raissa.rpa.service.AuthService;
-import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.service.commons.AuthService;
+import com.raissa.rpa.service.commons.ValidationService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

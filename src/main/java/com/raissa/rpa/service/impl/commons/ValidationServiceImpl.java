@@ -1,4 +1,4 @@
-package com.raissa.rpa.service.impl;
+package com.raissa.rpa.service.impl.commons;
 
 import com.raissa.rpa.domain.entity.Account;
 import com.raissa.rpa.domain.entity.Session;
@@ -7,7 +7,7 @@ import com.raissa.rpa.domain.repository.SessionRepository;
 import com.raissa.rpa.exception.AccountInactiveException;
 import com.raissa.rpa.exception.AccountNotFoundException;
 import com.raissa.rpa.exception.AuthenticationException;
-import com.raissa.rpa.service.ValidationService;
+import com.raissa.rpa.service.commons.ValidationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
