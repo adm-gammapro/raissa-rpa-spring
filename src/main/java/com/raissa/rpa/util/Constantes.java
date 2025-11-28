@@ -47,6 +47,11 @@ public class Constantes {
     public static final String TIPO_REQUEST_OBTENER_SALDO_BBVA = "OBTENER_SALDO_BBVA";
     public static final String TIPO_REQUEST_OBTENER_MOV_BBVA = "OBTENER_MOV_BBVA";
 
+    public static final String TIPO_REQUEST_LOGIN_IBK = "LOGIN_IBK";
+    public static final String TIPO_REQUEST_LOGOUT_IBK = "LOGOUT_IBK";
+    public static final String TIPO_REQUEST_OBTENER_SALDO_IBK = "OBTENER_SALDO_IBK";
+    public static final String TIPO_REQUEST_OBTENER_MOV_IBK = "OBTENER_MOV_IBK";
+
     public static final String KEY_DATA = "data";
     public static final String KEY_COUNT = "count";
 }

@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
-import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.SearchContext;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
@@ -37,18 +36,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     @Value("${banking.bbva.url}")
     private String bbvaUrl;
-
-    @Value("${2captcha.api.key}")
-    private String apiKey;
-
-    @Value("${2captcha.timeout}")
-    private String timeoutStr;
-
-    @Value("${2captcha.polling.interval}")
-    private String pollingStr;
-
-    @Value("${2captcha.polling.maxIntentos}")
-    private String cantIntentos;
 
     @Value("${app.production:false}")
     private boolean isProduction;

@@ -159,6 +159,50 @@ public class BCPEmpresaController {
     }
 
     /**
+     * Obtener transacciones de historico BCP
+     *
+     * @param transactionId id de transaccion
+     * @param numCuenta numero de cuenta
+     * @param fechaInicio fecha de inicio para búsqueda
+     * @param fechaFin fecha de fin par abúsqueda
+     * @param request datos de la peticion
+     * @return {@link Map} datos con los movimientos de la cuenta solicitada
+     */
+    @PostMapping("/transacciones-historicas/{numCuenta}/{transactionId}")
+    public ResponseEntity<Map<String, Object>> obtenerTransaccionesHistorico(@PathVariable String transactionId,
+                                                                             @PathVariable String numCuenta,
+                                                                             @RequestParam String fechaInicio,
+                                                                             @RequestParam String fechaFin,
+                                                                             HttpServletRequest request) {
+
+        log.info("Solicitud transacciones BCP recibida, transactionId: {}", transactionId);
+
+        String clientIp = ResponseGeneric.getClientIp(request);
+        String userAgent = request.getHeader(Constantes.KEY_USER_AGENT);
+        Session session = validationService.validateSession(transactionId);
+
+        RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_OBTENER_MOV_BCP, userAgent);
+
+        try {
+            Map<String, Object> resp = bcpEmpresaService.obtenerMovimientosHistorico(transactionId, numCuenta, fechaInicio, fechaFin);
+
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
+
+            log.info("Movimientos BCP obtenido exitosamente, transactionId: {}", transactionId);
+
+            return ResponseEntity.ok(resp);
+
+        } catch (Exception e) {
+            log.error("Error obteniendo movimietnos BCP: {}", e.getMessage());
+
+            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
+            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
+
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
      * Logout de BCP
      *
      * @param transactionId id de transaccion

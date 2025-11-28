@@ -25,10 +25,10 @@ public class Session {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "consumer_ip", length = 50)
+    @Column(name = "consumer_ip", length = 15)
     private String consumerIp;
 
-    @Column(name = "consumer_useragent", length = 100)
+    @Column(name = "consumer_useragent", length = 50)
     private String consumerUseragent;
 
     @ManyToOne
@@ -40,6 +40,9 @@ public class Session {
 
     @Column(name = "transaction_id", length = 100)
     private String transactionId;
+
+    @Column(name = "provider", length = 50)
+    private String provider;
 
     @Column(name = "active")
     private Integer active = 1;
