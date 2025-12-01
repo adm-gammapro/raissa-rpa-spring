@@ -44,6 +44,12 @@ public class Session {
     @Column(name = "provider", length = 50)
     private String provider;
 
+    @Column(name = "session_token", length = 200)
+    private String sessionToken;
+
+    @Column(name = "token_alterno", length = 500)
+    private String tokenAlterno;
+
     @Column(name = "active")
     private Integer active = 1;
 

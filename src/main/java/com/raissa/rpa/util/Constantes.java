@@ -52,6 +52,14 @@ public class Constantes {
     public static final String TIPO_REQUEST_OBTENER_SALDO_IBK = "OBTENER_SALDO_IBK";
     public static final String TIPO_REQUEST_OBTENER_MOV_IBK = "OBTENER_MOV_IBK";
 
+    public static final String TIPO_REQUEST_LOGIN_ALFIN = "LOGIN_ALFIN";
+    public static final String TIPO_REQUEST_OBTENER_SALDO_ALFIN = "OBTENER_SALDO_ALFIN";
+    public static final String TIPO_REQUEST_OBTENER_MOV_ALFIN = "OBTENER_MOV_ALFIN";
+
     public static final String KEY_DATA = "data";
     public static final String KEY_COUNT = "count";
+
+    public static final String PROVIDER_ALFIN = "alfin_api";
+    public static final String GRUPO_LOGIN = "login";
+    public static final String GRUPO_CONSULTAS = "consultas";
 }

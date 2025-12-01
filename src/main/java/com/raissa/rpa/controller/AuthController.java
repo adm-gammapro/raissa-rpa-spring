@@ -30,8 +30,6 @@ public class AuthController {
     private final AuthService authService;
     private final LoggingService loggingService;
 
-    private final Random random = new Random();
-
     /**
      * Login - Autenticación y generación de token
      *
