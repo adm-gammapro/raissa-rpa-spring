@@ -6,12 +6,14 @@ import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
+import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.ElementNotInteractableException;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
+import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
@@ -192,20 +194,21 @@ public class BcpMenuServiceImpl implements BcpMenuService {
 
     public boolean navigateToResumen(WebDriver driver) {
         try {
-            WebElement cuentasOption = driver.findElement(By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']"));
-            cuentasOption.click();
+            By cuentasBy = By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']");
+            By resumenBy = By.xpath("//div[contains(@class,'ms-child')]//p[normalize-space()='Resumen de Cuentas']");
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(6));
 
-            Thread.sleep(200);
+            WebElement resumenOption;
+            try {
+                resumenOption = wait.until(ExpectedConditions.elementToBeClickable(resumenBy));
+            } catch (TimeoutException e) {
+                WebElement cuentasOption = wait.until(ExpectedConditions.elementToBeClickable(cuentasBy));
+                cuentasOption.click();
+                resumenOption = wait.until(ExpectedConditions.elementToBeClickable(resumenBy));
+            }
 
-            WebElement resumenOption = driver.findElement(By.xpath("//div[@class='ms-child']//p[normalize-space()='Resumen de Cuentas']"));
             resumenOption.click();
-
             return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.warn("Error navegando a resumen: {}", e.getMessage());
             return false;
@@ -214,50 +217,57 @@ public class BcpMenuServiceImpl implements BcpMenuService {
 
     public boolean selectCuenta(WebDriver driver, String numeroCuenta) {
         try {
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            if (!seleccionarTabCuentasXpath(wait)) {
+                log.warn("No se pudo abrir la pestaña de cuentas");
+                return false;
+            }
 
-            if(seleccionarTabCuentasXpath(wait)) {
-                wait.until(ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-table-row-9nbaaa[contains(@index, '" + numeroCuenta + "')]")
-                ));
+            String objetivo = numeroCuenta.replaceAll("\\D", "");
 
-                WebElement botonMovimientos = wait.until(ExpectedConditions.elementToBeClickable(
-                        By.xpath(".//bcp-icon-9nbaaa[@name='eye-b']")
-                ));
+            List<WebElement> filas = wait.until(
+                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
+                            By.cssSelector("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]")
+                    )
+            );
 
-                ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", botonMovimientos);
-                Thread.sleep(500);
+            for (WebElement fila : filas) {
 
-                botonMovimientos.click();
+                WebElement celdaCuenta = fila.findElement(
+                        By.cssSelector("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text")
+                );
 
-                wait.until(ExpectedConditions.or(
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//*[contains(text(), 'Detalle') or contains(text(), 'cuenta')]")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-datepicker-range-bpbaaa[@id-auto='range-last-movements']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//input[@name='inputDateFrom']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//input[@name='inputDateTo']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-button-bpbaaa[@id-auto='clean-fiters-account-detail']")
-                        )
-                ));
+                String cuentaTabla = celdaCuenta.getText().replaceAll("\\D", "");
+                if (!objetivo.equals(cuentaTabla)) {
+                    continue;
+                }
 
+                log.debug("Cuenta {} encontrada, preparando click en detalle", numeroCuenta);
+
+                new Actions(driver).moveToElement(fila).pause(Duration.ofMillis(200)).perform();
+
+                WebElement iconoDetalle = fila.findElement(
+                        By.cssSelector(".options-container bcp-icon-9nbaaa[name='eye-b']")
+                );
+
+                wait.until(ExpectedConditions.elementToBeClickable(iconoDetalle));
+                clickWithFallback(driver, iconoDetalle);
+
+                esperarPantallaDetalle(wait);
                 return true;
             }
+
+            log.warn("No se encontró la cuenta {}", numeroCuenta);
             return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw new BcpException("Interrupción durante la navegación",
+                        "BCP_NAVIGATION_INTERRUPTED",
+                        "El proceso fue interrumpido durante la navegación");
+            }
             log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
             return false;
         }
@@ -413,55 +423,54 @@ public class BcpMenuServiceImpl implements BcpMenuService {
 
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
-            if(seleccionarTabCuentasXpath(wait)) {
-                wait.until(ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-table-row-9nbaaa[contains(@index, '" + numeroCuenta + "')]")
-                ));
+            if (!seleccionarTabCuentasXpath(wait)) {
+                log.warn("No se pudo abrir la pestaña de cuentas");
+                return false;
+            }
 
-                WebElement botonMovimientos = wait.until(ExpectedConditions.elementToBeClickable(
-                        By.xpath(".//bcp-icon-9nbaaa[@name='clock-b']")
-                ));
+            String objetivo = numeroCuenta.replaceAll("\\D", "");
 
-                ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", botonMovimientos);
-                Thread.sleep(500);
+            List<WebElement> filas = wait.until(
+                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
+                            By.cssSelector("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]")
+                    )
+            );
 
-                botonMovimientos.click();
+            for (WebElement fila : filas) {
+                WebElement celdaCuenta = fila.findElement(
+                        By.cssSelector("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text")
+                );
 
-                wait.until(ExpectedConditions.or(
-                        ExpectedConditions.urlContains("movimientos"),
-                        ExpectedConditions.urlContains("historico"),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//*[contains(text(), 'Movimientos') or contains(text(), 'Histórico')]")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-datepicker-range-bpbaaa[@id-auto='range-movements']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-input-bpbaaa[@name='inputDateFrom']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-input-bpbaaa[@name='inputDateTo']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-select-bpbaaa[@id-auto='historical-movement-type']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']")
-                        ),
-                        ExpectedConditions.visibilityOfElementLocated(
-                                By.xpath("//*[contains(@class, 'historical-movements__filters')]")
-                        )
-                ));
+                String cuentaTabla = celdaCuenta.getText().replaceAll("\\D", "");
+                if (!objetivo.equals(cuentaTabla)) {
+                    continue;
+                }
 
+                log.debug("Cuenta {} encontrada, preparando click en histórico", numeroCuenta);
+
+                new Actions(driver).moveToElement(fila).pause(Duration.ofMillis(200)).perform();
+
+                WebElement iconoHistorico = fila.findElement(
+                        By.cssSelector(".options-container bcp-icon-9nbaaa[name='clock-b']")
+                );
+
+                wait.until(ExpectedConditions.elementToBeClickable(iconoHistorico));
+                clickWithFallback(driver, iconoHistorico);
+
+                esperarPantallaHistorico(wait);
                 return true;
             }
+
+            log.warn("No se encontró la cuenta {}", numeroCuenta);
             return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw new BcpException("Interrupción durante la navegación",
+                        "BCP_NAVIGATION_INTERRUPTED",
+                        "El proceso fue interrumpido durante la navegación");
+            }
             log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
             return false;
         }
@@ -638,6 +647,66 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         } catch (Exception e) {
             log.debug("XPath específico también falló: {}", e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Espera a que cargue la página de busqueda historica
+     *
+     * @param wait datos de pagina a ubicar
+     */
+    private void esperarPantallaHistorico(WebDriverWait wait) {
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.urlContains("movimientos"),
+                ExpectedConditions.urlContains("historico"),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.cssSelector("ibk-historical-date ibk-datepicker-range-v2")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.cssSelector("[data-test='btnBuscarMovimientos'], [data-test='btnEnter']")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//*[contains(@class,'historical-movements__filters')]")
+                )
+        ));
+    }
+
+    /**
+     * Espera a que cargue la pagina de detalle
+     *
+     * @param wait datos de pagina a ubicar
+     */
+    private void esperarPantallaDetalle(WebDriverWait wait) {
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.urlContains("detalle"),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.cssSelector("ibk-account-detail, ibk-account-detail-info")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.xpath("//*[contains(text(), 'Detalle') and contains(text(), 'cuenta')]")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.cssSelector("bcp-input-bpbaaa[name='inputDateFrom']")
+                ),
+                ExpectedConditions.visibilityOfElementLocated(
+                        By.cssSelector("bcp-button-bpbaaa[id-auto='clean-fiters-account-detail']")
+                )
+        ));
+    }
+
+    /**
+     * Clickea en el boton de historico correspondiente a la fila encontrada
+     *
+     * @param driver manejador de páginas
+     * @param element elemento ubicado
+     */
+    private void clickWithFallback(WebDriver driver, WebElement element) {
+        try {
+            element.click();
+        } catch (ElementNotInteractableException ex) {
+            JavascriptExecutor js = (JavascriptExecutor) driver;
+            js.executeScript("arguments[0].scrollIntoView({block:'center'});", element);
+            js.executeScript("arguments[0].click();", element);
         }
     }
 

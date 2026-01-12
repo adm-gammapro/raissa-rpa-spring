@@ -478,8 +478,16 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
         try {
             WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+
+            WebElement passwordBox = wait.until(ExpectedConditions.elementToBeClickable(
+                    By.cssSelector("bcp-input-password .input-password")
+            ));
+            passwordBox.click();
+
             List<WebElement> keyboardKeys = wait.until(
-                    ExpectedConditions.presenceOfAllElementsLocatedBy(By.cssSelector("bcp-keyboard-key[index]"))
+                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
+                            By.cssSelector("bcp-input-password bcp-keyboard-key[index]")
+                    )
             );
 
             log.info("Teclas encontradas: {}", keyboardKeys.size());
@@ -492,7 +500,12 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
             int processedCount = 0;
             for (WebElement key : keyboardKeys) {
-                if (processKeyboardKey(key, keyMap)) {
+                String idx = key.getDomAttribute("index");
+                WebElement digit = key.findElement(By.cssSelector(".digit-number"));
+                String label = digit.getText().trim();
+
+                if (!label.isEmpty() && idx != null) {
+                    keyMap.put(label, Integer.parseInt(idx));
                     processedCount++;
                 }
             }
@@ -692,11 +705,12 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
         log.info("Extrayendo captcha BCP...");
 
         try {
-            String xpath = "//bcp-img[@class='bcp-img-host hydrated']/img[@height='48' and @width='127' and contains(@src, 'data:image')]";
+            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            String css = "bcp-captcha bcp-img img[src^='data:image']";
+
             WebElement captchaImg = wait.until(
-                    ExpectedConditions.visibilityOfElementLocated(By.xpath(xpath))
+                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector(css))
             );
 
             String src = captchaImg.getDomAttribute("src");

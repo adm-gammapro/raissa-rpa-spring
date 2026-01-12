@@ -42,8 +42,10 @@ public class JwtSecurityConfig {
                         // Endpoints protegidos
                         .requestMatchers("/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/session").authenticated()
-                        .requestMatchers("/api/bcp/**").authenticated()
-                        .requestMatchers("/api/bbva/**").authenticated()
+                        .requestMatchers("/api/bcp-empresa/**").authenticated()
+                        .requestMatchers("/api/bbva-empresa/**").authenticated()
+                        .requestMatchers("/api/ibk-empresa/**").authenticated()
+                        .requestMatchers("/api/alfin-empresa-api/**").authenticated()
 
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
