@@ -5,20 +5,18 @@ import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.bbva.BBVAEmpresaService;
 import com.raissa.rpa.service.bbva.BbvaMenuService;
+import com.raissa.rpa.service.commons.NavigatorService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.SearchContext;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
@@ -37,9 +35,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     @Value("${banking.bbva.url}")
     private String bbvaUrl;
 
-    @Value("${app.production:false}")
-    private boolean isProduction;
-
+    private final NavigatorService navigatorService;
     private final BbvaMenuService bbvaMenuService;
 
     private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
@@ -53,43 +49,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         Map<String, Object> result;
 
         try {
-            ChromeOptions options = new ChromeOptions();
-            options.addArguments("--no-sandbox");
-            options.addArguments("--window-size=1400,1000");
-
-            // Disimula automatización
-            options.addArguments("--disable-blink-features=AutomationControlled");
-            options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
-            options.setExperimentalOption("useAutomationExtension", false);
-
-            // User-Agent realista
-            options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-
-            // crea otro perfil
-            options.addArguments("--profile-directory=Default");
-
-            if (isProduction) {
-                options.addArguments("--headless=new");
-                options.addArguments("--disable-gpu");
-                options.addArguments("--no-sandbox");
-                options.addArguments("--font-render-hinting=medium");
-                options.addArguments("--disable-dev-shm-usage");
-            }
-
-            options.addArguments("--lang=es-PE"); // ajusta si corresponde
-
-            driver = new ChromeDriver(options);
-            ((JavascriptExecutor) driver).executeScript(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            );
-
-            ((JavascriptExecutor) driver).executeScript(
-                    "Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});"
-            );
-            ((JavascriptExecutor) driver).executeScript(
-                    "Object.defineProperty(navigator, 'languages', {get: () => ['es-PE','es','en']});"
-            );
+            driver = navigatorService.iniciarNavegador();
 
             driver.get(bbvaUrl);
 

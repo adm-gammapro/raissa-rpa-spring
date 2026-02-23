@@ -4,20 +4,21 @@ import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.bcp.BCPEmpresaService;
 import com.raissa.rpa.service.bcp.BcpMenuService;
+import com.raissa.rpa.service.commons.NavigatorService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import com.twocaptcha.TwoCaptcha;
+import com.twocaptcha.captcha.HCaptcha;
 import com.twocaptcha.captcha.Normal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
@@ -28,7 +29,6 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -49,9 +49,7 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     @Value("${2captcha.polling.interval}")
     private String pollingStr;
 
-    @Value("${app.production:false}")
-    private boolean isProduction;
-
+    private final NavigatorService navigatorService;
     private final BcpMenuService bcpMenuService;
 
     private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
@@ -65,38 +63,15 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
         Map<String, Object> result;
 
         try {
-            ChromeOptions options = new ChromeOptions();
-            options.addArguments("--no-sandbox");
-            options.addArguments("--window-size=1400,1000");
+            driver = navigatorService.iniciarNavegador();
 
-            // Disimula automatización
-            options.addArguments("--disable-blink-features=AutomationControlled");
-            options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
-            options.setExperimentalOption("useAutomationExtension", false);
-
-            // User-Agent realista
-            options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-
-            // crea otro perfil
-            options.addArguments("--profile-directory=Default");
-
-            if (isProduction) {
-                options.addArguments("--headless=new");
-                options.addArguments("--disable-gpu");
-                options.addArguments("--no-sandbox");
-                options.addArguments("--font-render-hinting=medium");
-                options.addArguments("--disable-dev-shm-usage");
-            }
-
-            options.addArguments("--lang=es-PE");
-
-            driver = new ChromeDriver(options);
             driver.get(bcpUrl);
 
             log.info("Navegando a: {}", bcpUrl);
 
             MetodsGeneric.randomWait(2000, 3000);
+
+            handleHCaptchaIfPresent(driver);
 
             // 1. ✅ Ingresar código de usuario
             enterUserCode(driver, credentials.get("codigoUsuario"));
@@ -532,86 +507,6 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     }
 
     /**
-     * Procesa una tecla y devuelve true si fue exitoso
-     *
-     * @param key elemento de página
-     * @param keyMap mapa de teclas
-     * @return {@link boolean}
-     */
-    private boolean processKeyboardKey(WebElement key, Map<String, Integer> keyMap) {
-        try {
-            if (!key.isDisplayed()) {
-                log.debug("Tecla no visible, omitiendo...");
-                return false;
-            }
-
-            Optional<Integer> indexOpt = extractKeyIndex(key);
-            Optional<String> digitOpt = extractKeyDigit(key);
-
-            if (indexOpt.isPresent() && digitOpt.isPresent()) {
-                String digit = digitOpt.get();
-                Integer index = indexOpt.get();
-
-                if (keyMap.containsKey(digit)) {
-                    log.warn("Tecla duplicada encontrada: {} -> {} (ya existía: {})",
-                            digit, index, keyMap.get(digit));
-                    return false;
-                }
-
-                keyMap.put(digit, index);
-                log.debug("Tecla mapeada: {} -> {}", digit, index);
-                return true;
-            }
-
-            return false;
-
-        } catch (Exception e) {
-            log.warn("Error procesando tecla: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Extrae el índice de la tecla desde el atributo 'index'
-     *
-     * @param key elemento de página
-     * @return {@link Optional<Integer>}
-     */
-    private Optional<Integer> extractKeyIndex(WebElement key) {
-        try {
-            String indexStr = key.getDomAttribute("index");
-            if (indexStr == null || indexStr.trim().isEmpty()) {
-                log.debug("Tecla sin atributo index");
-                return Optional.empty();
-            }
-            return Optional.of(Integer.parseInt(indexStr.trim()));
-        } catch (NumberFormatException e) {
-            log.warn("Atributo index no es un número válido");
-            return Optional.empty();
-        } catch (Exception e) {
-            log.warn("Error obteniendo índice de tecla: {}", e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    /**
-     * Extrae el dígito de la tecla desde el elemento de título
-     *
-     * @param key elemento de página
-     * @return {@link Optional<String>}
-     */
-    private Optional<String> extractKeyDigit(WebElement key) {
-        try {
-            WebElement titleElement = key.findElement(By.cssSelector("bcp-title h3"));
-            String digit = titleElement.getText().trim();
-            return digit.isEmpty() ? Optional.empty() : Optional.of(digit);
-        } catch (Exception e) {
-            log.warn("Error obteniendo dígito de tecla: {}", e.getMessage());
-            return Optional.empty();
-        }
-    }
-
-    /**
      * Validar que el mapeo del teclado sea completo
      *
      * @param keyMap mapa de teclas
@@ -953,5 +848,106 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                     "BCP_LOGIN_BUTTON_ERROR",
                     "Error al enviar el formulario de login");
         }
+    }
+
+    /**
+     * Resuelve un Hcaptcha
+     * @param driver manejador de página
+     * @throws InterruptedException Exception para detener la ejecucion del analisis de una página
+     */
+    private void handleHCaptchaIfPresent(WebDriver driver) throws InterruptedException {
+        List<WebElement> widgets = driver.findElements(By.cssSelector(".h-captcha[data-sitekey], iframe[src*='hcaptcha']"));
+        if (widgets.isEmpty()) {
+            log.info("No se detectó hCaptcha, continuando...");
+            return;
+        }
+        log.warn("hCaptcha detectado, resolviendo con 2Captcha...");
+
+        String token = solveHCaptcha(driver);
+        if (token == null) {
+            throw new BcpException("No se pudo resolver el hCaptcha", "BCP_CAPTCHA_ERROR", "Token nulo");
+        }
+
+        injectHCaptchaToken(driver, token);
+
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(25));
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.invisibilityOfElementLocated(By.cssSelector(".h-captcha")),
+                ExpectedConditions.presenceOfElementLocated(By.cssSelector("input[name='user'], ibk-auth-main"))
+        ));
+        MetodsGeneric.randomWait(1200, 2000);
+        log.info("hCaptcha resuelto, continuando con login.");
+    }
+
+    private String solveHCaptcha(WebDriver driver) {
+        try {
+            String siteKey = null;
+
+            List<WebElement> divs = driver.findElements(By.cssSelector(".h-captcha[data-sitekey]"));
+            if (!divs.isEmpty()) {
+                siteKey = divs.get(0).getDomAttribute("data-sitekey");
+            }
+
+            if (siteKey == null || siteKey.isBlank()) {
+                List<WebElement> iframes = driver.findElements(By.cssSelector("iframe[src*='hcaptcha']"));
+                if (!iframes.isEmpty()) {
+                    String src = iframes.get(0).getDomAttribute("src");
+                    siteKey = extractQueryParam(src);
+                }
+            }
+
+            if (siteKey == null || siteKey.isBlank()) {
+                throw new IllegalStateException("No se pudo obtener sitekey de hCaptcha");
+            }
+
+            String pageUrl = driver.getCurrentUrl();
+            log.info("Resolviendo hCaptcha - sitekey: {}, url: {}", siteKey, pageUrl);
+
+            TwoCaptcha solver = new TwoCaptcha(apiKey);
+            solver.setDefaultTimeout(Integer.parseInt(timeoutStr));
+            solver.setRecaptchaTimeout(Integer.parseInt(timeoutStr));
+            solver.setPollingInterval(Integer.parseInt(pollingStr));
+
+            HCaptcha captcha = new HCaptcha();
+            captcha.setSiteKey(siteKey);
+            captcha.setUrl(pageUrl);
+
+            solver.solve(captcha);
+            String token = captcha.getCode();
+            log.info("Token hCaptcha obtenido (prefijo): {}...", token.substring(0, Math.min(18, token.length())));
+            return token;
+        } catch (Exception e) {
+            log.error("Error resolviendo hCaptcha: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String extractQueryParam(String url) {
+        if (url == null) return null;
+        try {
+            String[] parts = url.split("[?#]");
+            if (parts.length < 2) return null;
+            String[] qs = parts[1].split("&");
+            for (String q : qs) {
+                String[] kv = q.split("=", 2);
+                if (kv.length == 2 && kv[0].equals("sitekey")) {
+                    return java.net.URLDecoder.decode(kv[1], java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    private void injectHCaptchaToken(WebDriver driver, String token) {
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+        js.executeScript(
+                "var t=arguments[0];" +
+                        "var el1=document.querySelector('[name=\"h-captcha-response\"]');" +
+                        "var el2=document.querySelector('[name=\"g-recaptcha-response\"]');" +
+                        "if(el1) el1.value=t;" +
+                        "if(el2) el2.value=t;",
+                token
+        );
+        js.executeScript("if (typeof onCaptchaFinished==='function'){ onCaptchaFinished(arguments[0]); }", token);
     }
 }

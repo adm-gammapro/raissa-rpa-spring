@@ -870,7 +870,7 @@ public class BcpMenuServiceImpl implements BcpMenuService {
      */
     private void waitForPageStabilization() throws InterruptedException {
         log.debug("Esperando estabilización de la página post-login...");
-        Thread.sleep(3000);
+        MetodsGeneric.randomWait(4500, 6500);
     }
 
     /**

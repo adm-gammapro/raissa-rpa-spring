@@ -4,6 +4,7 @@ import com.raissa.rpa.config.SvgDigitClassifier;
 import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.IbkException;
 import com.raissa.rpa.exception.SessionNotFoundException;
+import com.raissa.rpa.service.commons.NavigatorService;
 import com.raissa.rpa.service.ibk.IBKEmpresaService;
 import com.raissa.rpa.service.ibk.IbkMenuService;
 import com.raissa.rpa.util.Constantes;
@@ -16,8 +17,6 @@ import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,19 +38,8 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     @Value("${banking.ibk.url}")
     private String ibkUrl;
 
-    @Value("${2captcha.api.key}")
-    private String apiKey;
-
-    @Value("${2captcha.timeout}")
-    private String timeoutStr;
-
-    @Value("${2captcha.polling.interval}")
-    private String pollingStr;
-
-    @Value("${app.production:false}")
-    private boolean isProduction;
-
     private final IbkMenuService ibkMenuService;
+    private final NavigatorService navigatorService;
 
     private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
 
@@ -64,33 +52,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         Map<String, Object> result;
 
         try {
-            ChromeOptions options = new ChromeOptions();
-            options.addArguments("--no-sandbox");
-            options.addArguments("--window-size=1400,1000");
-
-            // Disimula automatización
-            options.addArguments("--disable-blink-features=AutomationControlled");
-            options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
-            options.setExperimentalOption("useAutomationExtension", false);
-
-            // User-Agent realista
-            options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                    + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-
-            // crea otro perfil
-            options.addArguments("--profile-directory=Default");
-
-            if (isProduction) {
-                options.addArguments("--headless=new");
-                options.addArguments("--disable-gpu");
-                options.addArguments("--no-sandbox");
-                options.addArguments("--font-render-hinting=medium");
-                options.addArguments("--disable-dev-shm-usage");
-            }
-
-            options.addArguments("--lang=es-PE");
-
-            driver = new ChromeDriver(options);
+            driver = navigatorService.iniciarNavegador();
             driver.get(ibkUrl);
 
             log.info("Navegando a: {}", ibkUrl);
@@ -401,7 +363,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         WebElement docToggle = wait.until(ExpectedConditions.elementToBeClickable(
                 By.xpath("//mat-button-toggle[.//span[contains(normalize-space(.),'Doc. Identidad')]]//button")
         ));
-        if (!Boolean.parseBoolean(docToggle.getAttribute("aria-pressed"))) {
+        if (!Boolean.parseBoolean(docToggle.getDomAttribute("aria-pressed"))) {
             docToggle.click();
         }
     }
@@ -524,7 +486,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
             By docPasswordLocator = By.cssSelector("input#passwordDoc[data-test='txtPassword']");
             WebElement docPasswordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(docPasswordLocator));
 
-            if ("true".equalsIgnoreCase(docPasswordInput.getAttribute("readonly"))) {
+            if ("true".equalsIgnoreCase(docPasswordInput.getDomAttribute("readonly"))) {
                 ((JavascriptExecutor) driver).executeScript("arguments[0].removeAttribute('readonly');", docPasswordInput);
             }
 
