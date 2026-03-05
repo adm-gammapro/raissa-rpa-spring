@@ -1,23 +1,10 @@
 package com.raissa.rpa.service.impl.bbva;
 
-import com.raissa.rpa.exception.BbvaException;
 import com.raissa.rpa.service.bbva.BbvaMenuService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.DateUtils;
 import com.raissa.rpa.util.MetodsGeneric;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.ElementNotInteractableException;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.NoSuchElementException;
-import org.openqa.selenium.SearchContext;
-import org.openqa.selenium.StaleElementReferenceException;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.Select;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -25,13 +12,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 public class BbvaMenuServiceimpl implements BbvaMenuService {
-    public boolean isMenuVisible(WebDriver driver) {
+    /*public boolean isMenuVisible(WebDriver driver) {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
         try {
@@ -830,7 +815,7 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
      * @param driver Manejador de página
      * @return {@link List<Map>}
      */
-    private List<Map<String, Object>> extractMovimientos(WebDriver driver) {
+    /*private List<Map<String, Object>> extractMovimientos(WebDriver driver) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
@@ -863,12 +848,12 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         }
 
         return movimientos;
-    }
+    }*/
 
     /**
      * Extrae los datos de una fila de movimiento
      */
-    private Map<String, Object> extraerMovimientoDeFila(List<WebElement> columnas) {
+    /*private Map<String, Object> extraerMovimientoDeFila(List<WebElement> columnas) {
         Map<String, Object> movimiento = new HashMap<>();
 
         movimiento.put(Constantes.KEY_FECHA, getColumnText(columnas.get(0)));
@@ -896,12 +881,12 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         movimiento.put(Constantes.KEY_REFERENCIA, "");
 
         return movimiento;
-    }
+    }*/
 
     /**
      * Crea un movimiento adicional para el ITF
      */
-    private Map<String, Object> crearMovimientoITF(Map<String, Object> movimientoOriginal, double itfValue) {
+    /*private Map<String, Object> crearMovimientoITF(Map<String, Object> movimientoOriginal, double itfValue) {
         Map<String, Object> movimientoITF = new HashMap<>();
 
         movimientoITF.put("fecha", movimientoOriginal.get("fecha"));
@@ -919,12 +904,12 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         movimientoITF.put("saldo", "");
 
         return movimientoITF;
-    }
+    }*/
 
     /**
      * Obtiene el texto de una columna, manejando elementos anidados
      */
-    private String getColumnText(WebElement columna) {
+    /*private String getColumnText(WebElement columna) {
         try {
             List<WebElement> enlaces = columna.findElements(By.tagName("a"));
             if (!enlaces.isEmpty()) {
@@ -935,9 +920,9 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         } catch (Exception e) {
             return "";
         }
-    }
+    }*/
 
-    private Map<String, Object> mapearContenedorSeccion(WebElement contenedorSeccion) {
+    /*private Map<String, Object> mapearContenedorSeccion(WebElement contenedorSeccion) {
         Map<String, Object> mapa = new HashMap<>();
         try {
             WebElement contenidoAcordion = contenedorSeccion.findElement(
@@ -961,9 +946,9 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         }
 
         return mapa;
-    }
+    }*/
 
-    private Map<String, Object> mapearTabla(WebElement tabla) {
+    /*private Map<String, Object> mapearTabla(WebElement tabla) {
         Map<String, Object> mapaTabla = new HashMap<>();
 
         try {
@@ -1144,13 +1129,13 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
             return s.substring(0, split) + s.substring(split + 2);
         }
         return s;
-    }
+    }*/
 
     /**
      * Intenta emparejar eliminando cualquier par de 2 dígitos después de la octava posición.
      * Útil por si el “código” no siempre está exactamente en índice 8 o puede variar.
      */
-    private boolean maybeMatchByRemovingTwoDigits(String sourceDigits, String target) {
+    /*private boolean maybeMatchByRemovingTwoDigits(String sourceDigits, String target) {
         if (sourceDigits == null) return false;
         int start = Math.min(8, sourceDigits.length()); // a partir de la 9na posición lógica
         for (int i = start; i + 2 <= sourceDigits.length(); i++) {
@@ -1160,7 +1145,7 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
             }
         }
         return false;
-    }
+    }*/
 
     /**
      * Extrae movimientos historicos de la tabla de resultado
@@ -1168,7 +1153,7 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
      * @param driver Manejador de página
      * @return {@link List<Map>}
      */
-    private List<Map<String, Object>> extractMovimientosHistoricos(WebDriver driver) {
+    /*private List<Map<String, Object>> extractMovimientosHistoricos(WebDriver driver) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
@@ -1198,12 +1183,12 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         }
 
         return movimientos;
-    }
+    }*/
 
     /**
      * Extrae los datos de una fila de movimiento
      */
-    private Map<String, Object> extraerMovimientohistoricoDeFila(List<WebElement> columnas) {
+    /*private Map<String, Object> extraerMovimientohistoricoDeFila(List<WebElement> columnas) {
         Map<String, Object> movimiento = new HashMap<>();
 
         // Col 0: F. Operación
@@ -1322,5 +1307,5 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         } catch (Exception e) {
             log.error("Error rellenando campo {}: {}", campo.getAttribute("name"), e.getMessage());
         }
-    }
+    }*/
 }

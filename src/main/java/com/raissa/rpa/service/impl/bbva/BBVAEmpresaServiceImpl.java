@@ -11,22 +11,12 @@ import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.Keys;
-import org.openqa.selenium.SearchContext;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.interactions.Actions;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
@@ -38,18 +28,18 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     private final NavigatorService navigatorService;
     private final BbvaMenuService bbvaMenuService;
 
-    private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
+    //private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
         log.info("Iniciando proceso de login BBVA");
 
-        WebDriver driver = null;
-        boolean success = false;
-        Map<String, Object> result;
+        //WebDriver driver = null;
+        //boolean success = false;
+        Map<String, Object> result = null;
 
         try {
-            driver = navigatorService.iniciarNavegador();
+            /*driver = navigatorService.iniciarNavegador();
 
             driver.get(bbvaUrl);
 
@@ -90,14 +80,14 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
 
             log.info("Login BBVA completado exitosamente");
 
-            success = true;
+            success = true;*/
 
             return result;
-        } catch (InterruptedException e) {
+        /*} catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BbvaException("Interrupción durante la navegación",
                     "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+                    "El proceso fue interrumpido durante la navegación");*/
         } catch (Exception e) {
             log.error("Error genérico en login BBVA: {}", e.getMessage());
 
@@ -107,23 +97,23 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
 
             return errorResult;
         } finally {
-            if (driver != null && !success) {
+            //if (driver != null && !success) {
                 try {
-                    driver.quit();
+                    //driver.quit();
                     log.info("Driver cerrado debido a error");
                 } catch (Exception e) {
                     log.warn("Error al cerrar driver: {}", e.getMessage());
                 }
-            }
+            //}
         }
     }
 
     public Map<String, Object> obtenerSaldo(String transactionId) {
-        Map<String, Object> result;
+        Map<String, Object> result = null;
         log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
+            /*WebDriver driver = driverCache.get(transactionId);
 
             if (driver == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
@@ -149,15 +139,15 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
             result.put(Constantes.KEY_DATA, accounts.get(Constantes.KEY_DATA));
-            result.put(Constantes.KEY_COUNT, accounts.get(Constantes.KEY_COUNT));
+            result.put(Constantes.KEY_COUNT, accounts.get(Constantes.KEY_COUNT));*/
 
             return result;
 
-        } catch (InterruptedException e) {
+        /*} catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BbvaException("Interrupción durante la navegación",
                     "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+                    "El proceso fue interrumpido durante la navegación");*/
         } catch (Exception e) {
             log.error("Error obteniendo saldo BCP: {}", e.getMessage());
 
@@ -166,12 +156,12 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     }
 
     public Map<String, Object> obtenerMovimientos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin, boolean detalle) {
-        Map<String, Object> result;
+        Map<String, Object> result = null;
         log.info("Obteniendo movimientos BCP, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
+            /*WebDriver driver = driverCache.get(transactionId);
 
             if (driver == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
@@ -215,15 +205,15 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
             result.put(Constantes.KEY_COUNT, movimientos.size());
             result.put("cuenta", numeroCuenta);
             result.put("fechaInicio", fechaInicio);
-            result.put("fechaFin", fechaFin);
+            result.put("fechaFin", fechaFin);*/
 
             return result;
 
-        } catch (InterruptedException e) {
+        /*} catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BbvaException("Interrupción durante la navegación",
                     "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+                    "El proceso fue interrumpido durante la navegación");*/
         } catch (BbvaException e){
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         } catch (Exception e) {
@@ -233,12 +223,12 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     }
 
     public Map<String, Object> obtenerMovimientosHistoricos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin) {
-        Map<String, Object> result;
+        Map<String, Object> result = null;
         log.info("Obteniendo movimientos BCP, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
+            /*WebDriver driver = driverCache.get(transactionId);
 
             if (driver == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
@@ -278,15 +268,15 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
             result.put(Constantes.KEY_COUNT, movimientos.size());
             result.put("cuenta", numeroCuenta);
             result.put("fechaInicio", fechaInicio);
-            result.put("fechaFin", fechaFin);
+            result.put("fechaFin", fechaFin);*/
 
             return result;
 
-        } catch (InterruptedException e) {
+        /*} catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BbvaException("Interrupción durante la navegación",
                     "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+                    "El proceso fue interrumpido durante la navegación");*/
         } catch (Exception e) {
             log.error("Error obteniendo movimientos BCP: {}", e.getMessage());
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
@@ -294,7 +284,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
     }
 
     public Map<String, Object> logout(String transactionId) {
-        WebDriver driver = driverCache.get(transactionId);
+        /*WebDriver driver = driverCache.get(transactionId);
 
         if (driver == null) {
             throw new BcpException("Sesión no encontrada",
@@ -322,7 +312,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         } finally {
             driverCache.remove(transactionId);
             log.info("Sesión {} removida del cache", transactionId);
-        }
+        }*/
         return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
     }
 
@@ -334,7 +324,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
      * @param driver manejador de pagina
      * @param enterpriseCode código de usuario o número de tarjeta
      */
-    private void enterEnterpriseCode(WebDriver driver, String enterpriseCode) {
+    /*private void enterEnterpriseCode(WebDriver driver, String enterpriseCode) {
         log.info("Ingresando codigo de empresa...");
 
         try {
@@ -381,7 +371,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                     "BBVA_NAVIGATION_ERROR",
                     "Error en la navegación del portal del banco");
         }
-    }
+    }*/
 
     /**
      * Ingresa el código del usuario
@@ -389,7 +379,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
      * @param driver manejador de pagina
      * @param userCode código de usuario o número de tarjeta
      */
-    private void enterUserCode(WebDriver driver, String userCode) {
+    /*private void enterUserCode(WebDriver driver, String userCode) {
         log.info("Ingresando código de usuario...");
 
         try {
@@ -416,7 +406,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                     "BBVA_NAVIGATION_ERROR",
                     "Error en la navegación del portal del banco");
         }
-    }
+    }*/
 
     /**
      * Ingresa el código del usuario
@@ -424,7 +414,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
      * @param driver manejador de pagina
      * @param password código de usuario o número de tarjeta
      */
-    private void enterPassword(WebDriver driver, String password) {
+    /*private void enterPassword(WebDriver driver, String password) {
         log.info("Ingresando password...");
 
         try {
@@ -451,14 +441,14 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                     "BBVA_NAVIGATION_ERROR",
                     "Error en la navegación del portal del banco");
         }
-    }
+    }*/
 
     /**
      * Hace clic en el boton de ingresar
      *
      * @param driver manejador de página
      */
-    private void clickLoginButton(WebDriver driver) {
+    /*private void clickLoginButton(WebDriver driver) {
         log.info("Haciendo click en botón de login...");
 
         try {
@@ -479,14 +469,14 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                     "BBVA_LOGIN_BUTTON_ERROR",
                     "Error al enviar el formulario de login");
         }
-    }
+    }*/
 
     /**
      * Verifica si hay un modal y lo cierra
      *
      * @param driver manejador de página
      */
-    private void closeModalIfPresent(WebDriver driver) throws InterruptedException {
+    /*private void closeModalIfPresent(WebDriver driver) throws InterruptedException {
         try {
             WebElement host = driver.findElement(By.cssSelector("bbva-btge-microfrontend-modal[opened]"));
 
@@ -498,7 +488,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         } catch (Exception e) {
             log.error("Error al cerrar modal: {}", e.getMessage());
         }
-    }
+    }*/
 
     /**
      * Ubica un elemento en la página
@@ -507,8 +497,8 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
      * @param locator etiqueta a buscar
      * @return {@link WebElement}
      */
-    private WebElement waitForElement(WebDriver driver, By locator) {
+    /*private WebElement waitForElement(WebDriver driver, By locator) {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
         return wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
-    }
+    }*/
 }

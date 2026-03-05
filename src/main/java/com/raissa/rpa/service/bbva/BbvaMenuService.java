@@ -1,7 +1,5 @@
 package com.raissa.rpa.service.bbva;
 
-import org.openqa.selenium.WebDriver;
-
 import java.util.List;
 import java.util.Map;
 
@@ -12,7 +10,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean isMenuVisible(WebDriver driver);
+    //boolean isMenuVisible(WebDriver driver);
 
     /**
      * Hace clic en el menu de posicion global
@@ -20,7 +18,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean clickCuentas(WebDriver driver);
+    //boolean clickCuentas(WebDriver driver);
 
     /**
      * Clic en posicion general online
@@ -28,7 +26,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean clickPosicionGlobalOnline(WebDriver driver);
+    //boolean clickPosicionGlobalOnline(WebDriver driver);
 
     /**
      * Extraccion de saldos
@@ -36,7 +34,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link Map} datos de saldos
      */
-    Map<String, Object> extractAccounts(WebDriver driver);
+    //Map<String, Object> extractAccounts(WebDriver driver);
 
     /**
      * Clic en movimientos
@@ -44,7 +42,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean clickMovimientos(WebDriver driver);
+    //boolean clickMovimientos(WebDriver driver);
 
     /**
      * Realiza la bsuqueda por movimientos
@@ -54,7 +52,7 @@ public interface BbvaMenuService {
      * @param fechaDesde fecha de inicio para busqueda
      * @param fechaHasta fecha de inicio para busqueda
      */
-    void busquedaMovimientos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
+    //void busquedaMovimientos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
 
     /**
      * Extrae movimientos de la página
@@ -62,7 +60,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link List<Map>}
      */
-    List<Map<String, Object>> extraerMovimientos(WebDriver driver);
+    //List<Map<String, Object>> extraerMovimientos(WebDriver driver);
 
     /**
      * Extrae el detalle de los movimientos de la lista
@@ -71,7 +69,7 @@ public interface BbvaMenuService {
      * @param listMovements listado de movimientos
      * @return {@link List<Map>} Listado de movimientos actualizado
      */
-    List<Map<String, Object>> extraerDetalleMovimientos(WebDriver driver, List<Map<String, Object>> listMovements);
+    //List<Map<String, Object>> extraerDetalleMovimientos(WebDriver driver, List<Map<String, Object>> listMovements);
 
     /**
      * Clic en movimientos historicos
@@ -79,7 +77,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean clickMovimientosHistoricos(WebDriver driver);
+    //boolean clickMovimientosHistoricos(WebDriver driver);
 
     /**
      * Realiza la busqueda por movimientos historico
@@ -89,7 +87,7 @@ public interface BbvaMenuService {
      * @param fechaDesde fecha de inicio para busqueda
      * @param fechaHasta fecha de inicio para busqueda
      */
-    void busquedaMovimientosHistoricos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
+    //void busquedaMovimientosHistoricos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
 
     /**
      * Extrae movimientos historicos de la página
@@ -97,7 +95,7 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link List<Map>}
      */
-    List<Map<String, Object>> extraerMovimientosHistoricos(WebDriver driver);
+    //List<Map<String, Object>> extraerMovimientosHistoricos(WebDriver driver);
 
     /**
      * Hace clic en el boton salir
@@ -105,5 +103,5 @@ public interface BbvaMenuService {
      * @param driver Manejador de pagina
      * @return {@link boolean}
      */
-    boolean clickSalir(WebDriver driver);
+    //boolean clickSalir(WebDriver driver);
 }

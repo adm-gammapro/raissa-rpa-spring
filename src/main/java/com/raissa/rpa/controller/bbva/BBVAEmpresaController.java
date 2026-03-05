@@ -11,7 +11,6 @@ import com.raissa.rpa.util.ResponseGeneric;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.NoSuchElementException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -121,7 +120,7 @@ public class BBVAEmpresaController {
      * @param transactionId id de transaccion
      * @param numCuenta numero de cuenta
      * @param fechaInicio fecha de inicio para búsqueda
-     * @param fechaFin fecha de fin par abúsqueda
+     * @param fechaFin fecha de fin para búsqueda
      * @param request datos de la peticion
      * @return {@link Map} datos con los movimientos de la cuenta solicitada
      */
@@ -150,13 +149,13 @@ public class BBVAEmpresaController {
 
             return ResponseEntity.ok(resp);
 
-        } catch (NoSuchElementException e) {
+        /*} catch (NoSuchElementException e) {
             log.error("Error obteniendo movimientos BBVA: {}", e.getMessage());
 
             loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
             Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
-            return ResponseEntity.badRequest().body(errorResponse);
+            return ResponseEntity.badRequest().body(errorResponse);*/
         } catch (Exception e) {
             log.error("Error  BBVA: {}", e.getMessage());
 

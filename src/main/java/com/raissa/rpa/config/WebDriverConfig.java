@@ -1,15 +1,8 @@
 package com.raissa.rpa.config;
 
-import io.github.bonigarcia.wdm.WebDriverManager;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
+//@Configuration
 public class WebDriverConfig {
-    @Bean
+    /*@Bean
     public WebDriver webDriver() {
         WebDriverManager.chromedriver().setup();
 
@@ -19,5 +12,5 @@ public class WebDriverConfig {
         options.addArguments("--headless"); // Para producción
 
         return new ChromeDriver(options);
-    }
+    }*/
 }

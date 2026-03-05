@@ -1,5 +1,11 @@
 package com.raissa.rpa.service.impl.bcp;
 
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.WaitForSelectorState;
+import com.microsoft.playwright.options.WaitUntilState;
+import com.raissa.rpa.config.NavigatorSession;
 import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.bcp.BCPEmpresaService;
@@ -9,28 +15,18 @@ import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import com.twocaptcha.TwoCaptcha;
-import com.twocaptcha.captcha.HCaptcha;
 import com.twocaptcha.captcha.Normal;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.Keys;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.interactions.Actions;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -52,29 +48,32 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     private final NavigatorService navigatorService;
     private final BcpMenuService bcpMenuService;
 
-    private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, NavigatorSession> navigatorSessionCache = new ConcurrentHashMap<>();
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
         log.info("Iniciando proceso de login BCP");
 
-        WebDriver driver = null;
+        NavigatorSession sessionNavegacion = null;
         boolean success = false;
         Map<String, Object> result;
 
         try {
-            driver = navigatorService.iniciarNavegador();
+            sessionNavegacion = navigatorService.iniciarNavegador(transactionId);
+            Page page = sessionNavegacion.page();
 
-            driver.get(bcpUrl);
+            page.navigate(bcpUrl, new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.LOAD)
+                    .setTimeout(30_000));
+
+            MetodsGeneric.randomWaitPage(page,800, 1000);
 
             log.info("Navegando a: {}", bcpUrl);
 
-            MetodsGeneric.randomWait(2000, 3000);
-
-            handleHCaptchaIfPresent(driver);
+            bcpMenuService.manejarModalSesionExpirada(page);
 
             // 1. ✅ Ingresar código de usuario
-            enterUserCode(driver, credentials.get("codigoUsuario"));
+            enterUserCode(page, credentials.get("codigoUsuario"));
 
             // 2. ✅ INGRESAR CLAVE CON TECLADO VIRTUAL
             String claveAcceso = credentials.get("claveAcceso");
@@ -84,17 +83,24 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                         "La clave debe tener exactamente 6 dígitos");
             }
 
-            enterPassword(driver, claveAcceso);
-            MetodsGeneric.randomWait(300, 500);
+            enterPassword(page, claveAcceso);
+            MetodsGeneric.randomWaitPage(page,300, 500);
 
             // 3. ✅ MANEJAR CAPTCHA
-            handleCaptcha(driver);
+            handleCaptcha(page);
 
             // 4. ✅ CLICK EN BOTÓN LOGIN
-            clickLoginButton(driver);
+            clickLoginButton(page);
+
+            // 5. Verificar si el captcha fue aceptado
+            if (!isCaptchaAccepted(page)) {
+                throw new BcpException("Solución de captcha rechazada",
+                        "BCP_CAPTCHA_REJECTED",
+                        "La solución del captcha no fue aceptada");
+            }
 
             // 6. ✅ VERIFICAR LOGIN EXITOSO
-            boolean loginSuccess = bcpMenuService.verifyLoginSuccess(driver);
+            boolean loginSuccess = bcpMenuService.verifyLoginSuccess(page);
 
             if (!loginSuccess) {
                 throw new BcpException("Error en el login después de enviar formulario",
@@ -103,7 +109,7 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
             }
 
             // 6. ✅ ÉXITO - Almacenar driver y retornar resultado
-            driverCache.put(transactionId, driver);
+            navigatorSessionCache.put(transactionId, sessionNavegacion);
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Login BCP exitoso", true);
 
@@ -112,11 +118,6 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
             success = true;
 
             return result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error genérico en login BCP: {}", e.getMessage());
 
@@ -126,12 +127,12 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
             return errorResult;
         } finally {
-            if (driver != null && !success) {
+            if (sessionNavegacion != null && !success) {
                 try {
-                    driver.quit();
-                    log.info("Driver cerrado debido a error");
+                    sessionNavegacion.close();
+                    log.info("Sesión Playwright cerrada debido a error");
                 } catch (Exception e) {
-                    log.warn("Error al cerrar driver: {}", e.getMessage());
+                    log.warn("Error al cerrar sesión Playwright: {}", e.getMessage());
                 }
             }
         }
@@ -142,37 +143,36 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
         log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
             }
+            Page page = session.page();
 
             // 0. ✅ Manejar el modal móvil si está abierto
-            bcpMenuService.handleMobileModal(driver);
+            bcpMenuService.handleMobileModal(page);
 
-            if (!bcpMenuService.isOnAccountsPage(driver)) {
+            if (!bcpMenuService.isOnAccountsPage(page)) {
                 throw new BcpException("No se pudo navegar a cuentas",
                         "BCP_NAVIGATION_ERROR",
                         "No se pudo acceder a la sección de cuentas");
             }
 
             // 1. ✅ Hacer clic en el tab "Cuentas"
-            bcpMenuService.clickAccountsTab(driver);
+            bcpMenuService.clickAccountsTab(page);
 
             // 2. ✅ Esperar a que carguen los datos
-            bcpMenuService.waitForAccountsToLoad(driver);
+            bcpMenuService.waitForAccountsToLoad(page);
 
             // 3. ✅ Extraer datos de las cuentas
-            List<Map<String, Object>> accounts = bcpMenuService.extractAccountsData(driver);
+            List<Map<String, Object>> accounts = bcpMenuService.extractAccountsData(page);
 
             // 4. ✅ Retornar resultados
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
-            result.put("data", accounts);
-            result.put("count", accounts.size());
+            result.put(Constantes.KEY_DATA, accounts);
+            result.put(Constantes.KEY_COUNT, accounts.size());
 
             return result;
-
         } catch (Exception e) {
             log.error("Error obteniendo saldo BCP: {}", e.getMessage());
 
@@ -186,50 +186,42 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
             }
+            Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Resumen" del menú lateral
-            if (!bcpMenuService.navigateToResumen(driver)) {
-                throw new BcpException("No se pudo navegar a resumen",
-                        "BCP_NAVIGATION_ERROR",
-                        "No se pudo acceder a la sección de resumen");
-            }
+            bcpMenuService.navigateToResumen(page);
 
             // 2. ✅ Esperar a que cargue la página de resumen
-            bcpMenuService.waitForResumenAccountsToLoad(driver);
+            bcpMenuService.waitForResumenAccountsToLoad(page);
 
             // 3. ✅ Seleccionar la cuenta específica
-            if (!bcpMenuService.selectCuenta(driver, numeroCuenta)) {
+            if (!bcpMenuService.selectCuenta(page, numeroCuenta)) {
                 throw new BcpException("No se pudo seleccionar la cuenta",
                         "BCP_ACCOUNT_NOT_FOUND",
                         "La cuenta " + numeroCuenta + " no fue encontrada");
             }
 
             // 4. ✅ Configurar rango de fechas
-            if (!bcpMenuService.setDateRange(driver, fechaInicio, fechaFin)) {
-                throw new BcpException("No se pudo configurar el rango de fechas",
-                        "BCP_DATE_RANGE_ERROR",
-                        "Error al establecer fechas: " + fechaInicio + " - " + fechaFin);
-            }
+            bcpMenuService.setDateRange(page, fechaInicio, fechaFin);
 
             // 5. ✅ Aplicar filtros y esperar resultados
-            bcpMenuService.applyFilters(driver);
-            bcpMenuService.waitForMovimientosToLoad(driver);
+            bcpMenuService.applyFilters(page);
+            bcpMenuService.waitForMovimientosToLoad(page);
 
             // 6. ✅ Extraer datos de movimientos
-            List<Map<String, Object>> movimientos = bcpMenuService.extractMovimientosData(driver);
+            List<Map<String, Object>> movimientos = bcpMenuService.extractMovimientosData(page);
 
             // 7. ✅ Retornar resultados
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Movimientos obtenidos exitosamente", true);
-            result.put("data", movimientos);
-            result.put("count", movimientos.size());
-            result.put("cuenta", numeroCuenta);
-            result.put("fechaInicio", fechaInicio);
-            result.put("fechaFin", fechaFin);
+            result.put(Constantes.KEY_DATA, movimientos);
+            result.put(Constantes.KEY_COUNT, movimientos.size());
+            result.put(Constantes.KEY_CUENTA, numeroCuenta);
+            result.put(Constantes.KEY_FECHA_INICIO, fechaInicio);
+            result.put(Constantes.KEY_FECHA_FIN, fechaFin);
 
             return result;
 
@@ -241,46 +233,38 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
     public Map<String, Object> obtenerMovimientosHistorico(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin) {
         Map<String, Object> result;
-        log.info("Obteniendo movimientos BCP, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
+        log.info("Obteniendo movimientos históricos BCP, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
             }
+            Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Resumen" del menú lateral
-            if (!bcpMenuService.navigateToResumen(driver)) {
-                throw new BcpException("No se pudo navegar a resumen",
-                        "BCP_NAVIGATION_ERROR",
-                        "No se pudo acceder a la sección de resumen");
-            }
+            bcpMenuService.navigateToResumen(page);
 
             // 2. ✅ Esperar a que cargue la página de resumen
-            bcpMenuService.waitForResumenAccountsToLoad(driver);
+            bcpMenuService.waitForResumenAccountsToLoad(page);
 
             // 3. ✅ Seleccionar la cuenta específica
-            if (!bcpMenuService.selectCuentaHistorico(driver, numeroCuenta)) {
+            if (!bcpMenuService.selectCuentaHistorico(page, numeroCuenta)) {
                 throw new BcpException("No se pudo seleccionar la cuenta",
                         "BCP_ACCOUNT_NOT_FOUND",
                         "La cuenta " + numeroCuenta + " no fue encontrada");
             }
 
             // 4. ✅ Configurar rango de fechas
-            if (!bcpMenuService.setDateRange(driver, fechaInicio, fechaFin)) {
-                throw new BcpException("No se pudo configurar el rango de fechas",
-                        "BCP_DATE_RANGE_ERROR",
-                        "Error al establecer fechas: " + fechaInicio + " - " + fechaFin);
-            }
+            bcpMenuService.setDateRange(page, fechaInicio, fechaFin);
 
             // 5. ✅ Aplicar filtros y esperar resultados
-            bcpMenuService.applyFiltersHistorico(driver);
-            bcpMenuService.waitForMovimientosToLoad(driver);
+            bcpMenuService.applyFiltersHistorico(page);
+            bcpMenuService.waitForMovimientosToLoad(page);
 
             // 6. ✅ Extraer datos de movimientos
-            List<Map<String, Object>> movimientos = bcpMenuService.extractMovimientosData(driver);
+            List<Map<String, Object>> movimientos = bcpMenuService.extractMovimientosData(page);
 
             // 7. ✅ Retornar resultados
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Movimientos obtenidos exitosamente", true);
@@ -299,45 +283,48 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     }
 
     public Map<String, Object> logout(String transactionId) {
-        WebDriver driver = driverCache.get(transactionId);
+        NavigatorSession session = navigatorSessionCache.get(transactionId);
 
-        if (driver == null) {
+        if (session == null) {
             throw new BcpException("Sesión no encontrada",
                     "BCP_SESSION_NOT_FOUND",
                     "La sesión con ID " + transactionId + " no existe o ya fue cerrada");
         }
 
+        Page page = session.page();
+
         try {
             log.info("Iniciando proceso de logout para transactionId: {}", transactionId);
 
             // 1. ✅ ABRIR EL DROPDOWN DE PERFIL (si no está visible)
-            bcpMenuService.openProfileDropdown(driver);
+            bcpMenuService.openProfileDropdown(page);
 
             // 2. ✅ HACER CLICK EN "CERRAR SESIÓN"
-            bcpMenuService.clickLogoutButton(driver);
+            bcpMenuService.clickLogoutButton(page);
 
             // 3. ✅ MANEJAR POSIBLE ENCUESTA NPS (si aparece)
-            bcpMenuService.handleNpsSurvey(driver);
+            bcpMenuService.handleNpsSurvey(page);
 
             // 4. ✅ VERIFICAR QUE EL LOGOUT FUE EXITOSO
-            boolean logoutSuccess = bcpMenuService.verifyLogoutSuccess(driver);
+            boolean logoutSuccess = bcpMenuService.verifyLogoutSuccess(page);
 
             if (!logoutSuccess) {
                 log.warn("No se pudo verificar logout exitoso, cerrando navegador directamente");
             }
 
-            // 5. ✅ CERRAR EL DRIVER
-            driver.quit();
-            log.debug("Driver cerrado exitosamente");
+            // 5. ✅ Cerrar contexto/navegador
+            page.context().close(); // cierra el contexto de esta sesión
 
         } catch (Exception e) {
             log.error("Error durante logout: {}", e.getMessage());
-
-            driver.quit();
-
+            try {
+                page.context().close();
+            } catch (Exception ignored) {
+                log.warn("Error al cerrar contexto: {}", ignored.getMessage());
+            }
             throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
         } finally {
-            driverCache.remove(transactionId);
+            navigatorSessionCache.remove(transactionId);
             log.info("Sesión {} removida del cache", transactionId);
         }
 
@@ -347,33 +334,26 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Ingresa el código del usuario en este caso número de tarjeta
      *
-     * @param driver manejador de pagina
+     * @param page manejador de pagina
      * @param userCode código de usuario o número de tarjeta
      */
-    private void enterUserCode(WebDriver driver, String userCode) {
+    private void enterUserCode(Page page, String userCode) {
         log.info("Ingresando tarjeta/código de usuario...");
 
         try {
-            WebElement inputLogin = waitForElement(driver, By.cssSelector("input[name='ciam-input-card']"));
+            Locator inputLogin = MetodsGeneric.waitForVisible(page, "input[name='ciam-input-card']", 12_000);
 
-            inputLogin.clear();
-            MetodsGeneric.humanTypeText(inputLogin, userCode);
+            inputLogin.fill("");
+            MetodsGeneric.humanTypeText(inputLogin, userCode, 120, 220);
 
-            Actions actions = new Actions(driver);
-            actions.sendKeys(Keys.TAB).perform();
-            MetodsGeneric.randomWait(300, 500);
-            actions.sendKeys(Keys.TAB).perform();
-            MetodsGeneric.randomWait(300, 500);
+            page.keyboard().press("Tab");
+            MetodsGeneric.randomWaitPage(page,300, 500);
+            page.keyboard().press("Tab");
+            MetodsGeneric.randomWaitPage(page,300, 500);
 
             log.info("Usuario ingresado y tabs aplicados");
-
-        } catch (TimeoutException e) {
+        } catch (TimeoutError e) {
             throw BcpException.elementNotFound("input login", "input user");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             throw new BcpException("Error al aplicar tabs de navegación",
                     "BCP_NAVIGATION_ERROR",
@@ -382,28 +362,16 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     }
 
     /**
-     * Ubica un elemento en la página
-     *
-     * @param driver manejador de página
-     * @param locator etiqueta a buscar
-     * @return {@link WebElement}
-     */
-    private WebElement waitForElement(WebDriver driver, By locator) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-        return wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
-    }
-
-    /**
      * Ingresa el password en la caja de contraseña
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @param password contraseña a ingresar
      */
-    private void enterPassword(WebDriver driver, String password) {
+    private void enterPassword(Page page, String password) {
         log.info("Ingresando clave de {} dígitos...", password.length());
 
         try {
-            Map<String, Integer> keyMap = mapVirtualKeyboard(driver);
+            Map<String, Integer> keyMap = mapVirtualKeyboard(page);
 
             if (keyMap.isEmpty()) {
                 throw new BcpException("No se encontraron teclas en el teclado virtual",
@@ -421,15 +389,13 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
             }
 
             for (char digit : password.toCharArray()) {
-                String digitStr = String.valueOf(digit);
-                Integer keyIndex = keyMap.get(digitStr);
-
+                String d = String.valueOf(digit);
+                Integer keyIndex = keyMap.get(d);
                 log.info("Ingresando dígito: {} -> tecla índice: {}", digit, keyIndex);
-                clickVirtualKey(driver, keyIndex);
+                clickVirtualKey(page, keyIndex);
             }
 
             log.info("Clave ingresada exitosamente");
-
         } catch (BcpException e) {
             throw e;
         } catch (Exception e) {
@@ -443,56 +409,51 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Mapea teclado virtual
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link Map}
      */
-    private Map<String, Integer> mapVirtualKeyboard(WebDriver driver) {
+    private Map<String, Integer> mapVirtualKeyboard(Page page) {
         log.info("Mapeando teclado virtual del BCP...");
 
         Map<String, Integer> keyMap = new LinkedHashMap<>();
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            WebElement passwordBox = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.cssSelector("bcp-input-password .input-password")
-            ));
+            Locator passwordBox = MetodsGeneric.waitForVisible(page, "bcp-input-password .input-password", 5_000);
             passwordBox.click();
 
-            List<WebElement> keyboardKeys = wait.until(
-                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
-                            By.cssSelector("bcp-input-password bcp-keyboard-key[index]")
-                    )
-            );
+            Locator keyboardKeys = page.locator("bcp-input-password bcp-keyboard-key[index]");
+            keyboardKeys.first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(5_000));
 
-            log.info("Teclas encontradas: {}", keyboardKeys.size());
+            long total = keyboardKeys.count();
+            log.info("Teclas encontradas: {}", total);
 
-            if (keyboardKeys.isEmpty()) {
+            if (total == 0) {
                 throw new BcpException("Teclado virtual no encontrado",
                         "BCP_KEYBOARD_NOT_FOUND",
                         "No se encontraron teclas del teclado virtual");
             }
 
-            int processedCount = 0;
-            for (WebElement key : keyboardKeys) {
-                String idx = key.getDomAttribute("index");
-                WebElement digit = key.findElement(By.cssSelector(".digit-number"));
-                String label = digit.getText().trim();
-
+            int processed = 0;
+            for (int i = 0; i < total; i++) {
+                Locator key = keyboardKeys.nth(i);
+                String idx = key.getAttribute("index");
+                String label = key.locator(".digit-number").textContent().trim();
                 if (!label.isEmpty() && idx != null) {
                     keyMap.put(label, Integer.parseInt(idx));
-                    processedCount++;
+                    processed++;
                 }
             }
 
-            log.info("Teclas procesadas exitosamente: {}/{}", processedCount, keyboardKeys.size());
+            log.info("Teclas procesadas exitosamente: {}/{}", processed, total);
             log.debug("Teclado virtual mapeado: {}", keyMap);
 
             validateKeyMapping(keyMap);
 
             return keyMap;
 
-        } catch (TimeoutException e) {
+        } catch (TimeoutError e) {
             log.error("Timeout buscando teclado virtual: {}", e.getMessage());
             throw new BcpException("Timeout teclado virtual",
                     "BCP_KEYBOARD_TIMEOUT",
@@ -529,24 +490,16 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Hacer clic en cada dígito de la contraseña
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @param keyIndex indice de tecla
      */
-    private void clickVirtualKey(WebDriver driver, int keyIndex) {
+    private void clickVirtualKey(Page page, int keyIndex) {
         try {
             String selector = String.format("bcp-keyboard-key[index='%d']", keyIndex);
-            WebElement key = driver.findElement(By.cssSelector(selector));
+            Locator key = page.locator(selector);
 
-            key.click();
-            log.debug("Click en tecla índice: {}", keyIndex);
-
-            MetodsGeneric.randomWait(300, 500);
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+            key.click(new Locator.ClickOptions().setTimeout(4_000));
+            MetodsGeneric.randomWaitPage(page,300, 500);
         } catch (Exception e) {
             log.error("Error haciendo click en tecla {}: {}", keyIndex, e.getMessage());
             throw new BcpException("Error al hacer click en tecla virtual",
@@ -558,30 +511,22 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Interpreta imagen captcha
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      */
-    private void handleCaptcha(WebDriver driver) {
+    private void handleCaptcha(Page page) {
         log.info("Manejando captcha del BCP...");
 
         try {
             // 1. Obtener imagen del captcha (con reintentos)
-            String captchaImageBase64 = extractCaptchaBase64(driver);
+            String captchaImageBase64 = extractCaptchaBase64(page);
 
             // 2. Resolver el captcha
             String captchaSolution = resolveCaptcha(captchaImageBase64);
 
             // 3. Ingresar la solución
-            enterCaptchaSolution(driver, captchaSolution);
-
-            // 5. Verificar si el captcha fue aceptado
-            if (!isCaptchaAccepted(driver)) {
-                throw new BcpException("Solución de captcha rechazada",
-                        "BCP_CAPTCHA_REJECTED",
-                        "La solución del captcha no fue aceptada");
-            }
+            enterCaptchaSolution(page, captchaSolution);
 
             log.info("Captcha manejado exitosamente");
-
         } catch (Exception e) {
             log.error("Error manejando captcha: {}", e.getMessage());
             throw new BcpException("Error inesperado manejando captcha",
@@ -593,24 +538,17 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Extrae la imagen base64 del elemento captcha BCP
      *
-     * @param driver WebDriver
+     * @param page WebDriver
      * @return String base64 de la imagen
      */
-    private String extractCaptchaBase64(WebDriver driver) {
+    private String extractCaptchaBase64(Page page) {
         log.info("Extrayendo captcha BCP...");
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
-
             String css = "bcp-captcha bcp-img img[src^='data:image']";
-
-            WebElement captchaImg = wait.until(
-                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector(css))
-            );
-
-            String src = captchaImg.getDomAttribute("src");
+            Locator captchaImg = MetodsGeneric.waitForVisible(page, css, 8_000);
+            String src = captchaImg.getAttribute("src");
             log.info("Captcha encontrado, SRC length: {}", src != null ? src.length() : 0);
-
             return extractBase64FromSrc(src);
 
         } catch (Exception e) {
@@ -757,35 +695,19 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Ingresa la solucion del captacha
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @param solution solución del captcha
      */
-    private void enterCaptchaSolution(WebDriver driver, String solution) {
+    private void enterCaptchaSolution(Page page, String solution) {
         log.info("Ingresando solución del captcha: {}", solution);
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            WebElement captchaInput = wait.until(
-                    ExpectedConditions.visibilityOfElementLocated(
-                            By.cssSelector("input[name='bcp-input-0']")
-                    )
-            );
-
-            captchaInput.clear();
-            MetodsGeneric.humanTypeText(captchaInput, solution);
-
-            Actions actions = new Actions(driver);
-            actions.sendKeys(Keys.TAB).perform();
-            MetodsGeneric.randomWait(500, 800);
-
+            Locator captchaInput = MetodsGeneric.waitForVisible(page, "input[name='bcp-input-0']", 5_000);
+            captchaInput.fill("");
+            MetodsGeneric.humanTypeText(captchaInput, solution, 120, 220); // más humano
+            page.keyboard().press("Tab");
+            MetodsGeneric.randomWaitPage(page,500, 800);
             log.info("Solución del captcha ingresada exitosamente");
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error ingresando solución del captcha: {}", e.getMessage());
             throw new BcpException("Error ingresando solución de captcha",
@@ -797,23 +719,25 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Comprueba si el captacha fue aceptado
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    private boolean isCaptchaAccepted(WebDriver driver) {
+    private boolean isCaptchaAccepted(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(1));
+            MetodsGeneric.randomWaitPage(page,1000, 1500);
+            String selectorError = "bcp-alert p:has-text('El captcha ingresado es incorrecto.')";
+            Locator alertaError = page.locator(selectorError);
 
-            boolean hasError = wait.until(driverVal ->
-                    driverVal.findElements(
-                            By.cssSelector(".bcp-ffw-form-control:invalid, .error, .text-danger")
-                    ).isEmpty()
-            );
+            if (alertaError.count() > 0 && alertaError.first().isVisible()) {
+                log.warn("Captcha rechazado: Se detectó el mensaje 'El captcha ingresado es incorrecto.'");
+                return false;
+            }
+            if (!page.url().contains("tarjeta-sesion")) {
+                log.info("Captcha aceptado: Ya no estamos en la página de login");
+                return true;
+            }
 
-            return !hasError;
-
-        } catch (TimeoutException e) {
-            log.debug("No se encontraron errores de captcha (timeout esperado)");
+            log.info("No se detectaron errores de captcha visibles");
             return true;
         } catch (Exception e) {
             log.warn("Error verificando estado del captcha: {}", e.getMessage());
@@ -824,130 +748,21 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     /**
      * Hace clic en el boton de ingresar
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      */
-    private void clickLoginButton(WebDriver driver) {
+    private void clickLoginButton(Page page) {
         log.info("Haciendo click en botón de login...");
 
         try {
-            WebElement loginButton = waitForElement(driver,By.xpath("//button//span[normalize-space()='Continuar']"));
-
-            loginButton.click();
+            Locator loginButton = MetodsGeneric.waitForVisible(page, "//button//span[normalize-space()='Continuar']", 2_000);
+            loginButton.click(new Locator.ClickOptions().setTimeout(2_000));
             log.info("Click en botón de login realizado");
-
-            MetodsGeneric.randomWait(2500, 3500);
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+            MetodsGeneric.randomWaitPage(page, 2500, 3500);
         } catch (Exception e) {
             log.error("Error haciendo click en botón login: {}", e.getMessage());
             throw new BcpException("Error al hacer click en botón de login",
                     "BCP_LOGIN_BUTTON_ERROR",
                     "Error al enviar el formulario de login");
         }
-    }
-
-    /**
-     * Resuelve un Hcaptcha
-     * @param driver manejador de página
-     * @throws InterruptedException Exception para detener la ejecucion del analisis de una página
-     */
-    private void handleHCaptchaIfPresent(WebDriver driver) throws InterruptedException {
-        List<WebElement> widgets = driver.findElements(By.cssSelector(".h-captcha[data-sitekey], iframe[src*='hcaptcha']"));
-        if (widgets.isEmpty()) {
-            log.info("No se detectó hCaptcha, continuando...");
-            return;
-        }
-        log.warn("hCaptcha detectado, resolviendo con 2Captcha...");
-
-        String token = solveHCaptcha(driver);
-        if (token == null) {
-            throw new BcpException("No se pudo resolver el hCaptcha", "BCP_CAPTCHA_ERROR", "Token nulo");
-        }
-
-        injectHCaptchaToken(driver, token);
-
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(25));
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.invisibilityOfElementLocated(By.cssSelector(".h-captcha")),
-                ExpectedConditions.presenceOfElementLocated(By.cssSelector("input[name='user'], ibk-auth-main"))
-        ));
-        MetodsGeneric.randomWait(1200, 2000);
-        log.info("hCaptcha resuelto, continuando con login.");
-    }
-
-    private String solveHCaptcha(WebDriver driver) {
-        try {
-            String siteKey = null;
-
-            List<WebElement> divs = driver.findElements(By.cssSelector(".h-captcha[data-sitekey]"));
-            if (!divs.isEmpty()) {
-                siteKey = divs.get(0).getDomAttribute("data-sitekey");
-            }
-
-            if (siteKey == null || siteKey.isBlank()) {
-                List<WebElement> iframes = driver.findElements(By.cssSelector("iframe[src*='hcaptcha']"));
-                if (!iframes.isEmpty()) {
-                    String src = iframes.get(0).getDomAttribute("src");
-                    siteKey = extractQueryParam(src);
-                }
-            }
-
-            if (siteKey == null || siteKey.isBlank()) {
-                throw new IllegalStateException("No se pudo obtener sitekey de hCaptcha");
-            }
-
-            String pageUrl = driver.getCurrentUrl();
-            log.info("Resolviendo hCaptcha - sitekey: {}, url: {}", siteKey, pageUrl);
-
-            TwoCaptcha solver = new TwoCaptcha(apiKey);
-            solver.setDefaultTimeout(Integer.parseInt(timeoutStr));
-            solver.setRecaptchaTimeout(Integer.parseInt(timeoutStr));
-            solver.setPollingInterval(Integer.parseInt(pollingStr));
-
-            HCaptcha captcha = new HCaptcha();
-            captcha.setSiteKey(siteKey);
-            captcha.setUrl(pageUrl);
-
-            solver.solve(captcha);
-            String token = captcha.getCode();
-            log.info("Token hCaptcha obtenido (prefijo): {}...", token.substring(0, Math.min(18, token.length())));
-            return token;
-        } catch (Exception e) {
-            log.error("Error resolviendo hCaptcha: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private String extractQueryParam(String url) {
-        if (url == null) return null;
-        try {
-            String[] parts = url.split("[?#]");
-            if (parts.length < 2) return null;
-            String[] qs = parts[1].split("&");
-            for (String q : qs) {
-                String[] kv = q.split("=", 2);
-                if (kv.length == 2 && kv[0].equals("sitekey")) {
-                    return java.net.URLDecoder.decode(kv[1], java.nio.charset.StandardCharsets.UTF_8);
-                }
-            }
-        } catch (Exception ignored) { }
-        return null;
-    }
-
-    private void injectHCaptchaToken(WebDriver driver, String token) {
-        JavascriptExecutor js = (JavascriptExecutor) driver;
-        js.executeScript(
-                "var t=arguments[0];" +
-                        "var el1=document.querySelector('[name=\"h-captcha-response\"]');" +
-                        "var el2=document.querySelector('[name=\"g-recaptcha-response\"]');" +
-                        "if(el1) el1.value=t;" +
-                        "if(el2) el2.value=t;",
-                token
-        );
-        js.executeScript("if (typeof onCaptchaFinished==='function'){ onCaptchaFinished(arguments[0]); }", token);
     }
 }

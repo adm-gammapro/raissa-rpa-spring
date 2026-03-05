@@ -1,5 +1,11 @@
 package com.raissa.rpa.service.impl.ibk;
 
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.WaitForSelectorState;
+import com.microsoft.playwright.options.WaitUntilState;
+import com.raissa.rpa.config.NavigatorSession;
 import com.raissa.rpa.config.SvgDigitClassifier;
 import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.IbkException;
@@ -12,24 +18,17 @@ import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.text.ParseException;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 @Slf4j
@@ -41,29 +40,33 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     private final IbkMenuService ibkMenuService;
     private final NavigatorService navigatorService;
 
-    private final Map<String, WebDriver> driverCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, NavigatorSession> navigatorSessionCache = new ConcurrentHashMap<>();
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
         log.info("Iniciando proceso de login IBK");
 
-        WebDriver driver = null;
+        NavigatorSession sessionNavegacion = null;
         boolean success = false;
         Map<String, Object> result;
 
         try {
-            driver = navigatorService.iniciarNavegador();
-            driver.get(ibkUrl);
+            sessionNavegacion = navigatorService.iniciarNavegador(transactionId);
+            Page page = sessionNavegacion.page();
+
+            page.navigate(ibkUrl, new Page.NavigateOptions()
+                    .setWaitUntil(WaitUntilState.LOAD)
+                    .setTimeout(30_000));
+
+            MetodsGeneric.randomWaitPage(page,800, 1_000);
 
             log.info("Navegando a: {}", ibkUrl);
 
-            MetodsGeneric.randomWait(2000, 3000);
-
             // 1. ✅ Seleccionar tipo de documento (toggle + combo)
             String docSelector = credentials.get("codigoEmpresa");
-            selectLoginDocumentType(driver, docSelector);
+            selectLoginDocumentType(page, docSelector);
 
-            MetodsGeneric.randomWait(2000, 3000);
+            MetodsGeneric.randomWaitPage(page,1_000, 2_000);
 
             String usuario = credentials.get("codigoUsuario");
 
@@ -87,7 +90,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
             }
 
             // 2. ✅ Ingresar código de usuario
-            enterUserCode(driver, docSelector, usuario);
+            enterUserCode(page, docSelector, usuario);
 
             // 2. ✅ INGRESAR CLAVE
             String claveAcceso = credentials.get("claveAcceso");
@@ -110,14 +113,14 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
                 }
             }
 
-            enterPassword(driver, docSelector, claveAcceso);
-            MetodsGeneric.randomWait(300, 500);
+            enterPassword(page, docSelector, claveAcceso);
+            MetodsGeneric.randomWaitPage(page, 300, 500);
 
             // 3. ✅ CLICK EN BOTÓN LOGIN
-            clickLoginButton(driver);
+            clickLoginButton(page);
 
             // 6. ✅ VERIFICAR LOGIN EXITOSO
-            boolean loginSuccess = ibkMenuService.verifyLoginSuccess(driver);
+            boolean loginSuccess = ibkMenuService.verifyLoginSuccess(page);
 
             if (!loginSuccess) {
                 throw new IbkException("Error en el login después de enviar formulario",
@@ -125,8 +128,8 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
                         "Error al verificar el login exitoso");
             }
 
-            // 6. ✅ ÉXITO - Almacenar driver y retornar resultado
-            driverCache.put(transactionId, driver);
+            // 7. ✅ ÉXITO - Almacenar driver y retornar resultado
+            navigatorSessionCache.put(transactionId, sessionNavegacion);
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Login IBK exitoso", true);
 
@@ -135,11 +138,6 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
             success = true;
 
             return result;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "IBK_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error genérico en login IBK: {}", e.getMessage());
 
@@ -149,12 +147,12 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
 
             return errorResult;
         } finally {
-            if (driver != null && !success) {
+            if (sessionNavegacion != null && !success) {
                 try {
-                    driver.quit();
-                    log.info("Driver cerrado debido a error");
+                    sessionNavegacion.close();
+                    log.info("Sesión Playwright cerrada debido a error");
                 } catch (Exception e) {
-                    log.warn("Error al cerrar driver: {}", e.getMessage());
+                    log.warn("Error al cerrar sesión Playwright: {}", e.getMessage());
                 }
             }
         }
@@ -165,36 +163,33 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         log.info("Obteniendo saldo IBK, transactionId: {}", transactionId);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
             }
+            Page page = session.page();
 
-            if (!ibkMenuService.verifyLoginSuccess(driver)) {
+            if (!ibkMenuService.closeCampaignPopupIfPresent(page)) {
+                log.info("No hay popup que cerrar");
+            }
+
+            if (!ibkMenuService.verifyLoginSuccess(page)) {
                 throw new IbkException("No se pudo navegar a cuentas",
                         "IBK_NAVIGATION_ERROR",
                         "No se pudo acceder a la sección de cuentas");
             }
 
-            if (!ibkMenuService.closeCampaignPopupIfPresent(driver)) {
-                log.info("No hay popup que cerrar");
-            }
-
             // 1. ✅ Hacer clic en "consultas"
-            if (!ibkMenuService.clickConsultas(driver)) {
+            if (!ibkMenuService.clickConsultas(page)) {
                 throw new IbkException("No se pudo navegar a saldos",
                         "IBK_NAVIGATION_ERROR",
                         "No se pudo acceder a la sección de saldos");
             }
 
-            // 2. ✅ Esperar a que carguen los datos
-            ibkMenuService.waitForAccountsToLoad(driver);
+            // 2. ✅ Extraer datos de las cuentas
+            List<Map<String, Object>> accounts = ibkMenuService.extractAccountsData(page);
 
-            // 3. ✅ Extraer datos de las cuentas
-            List<Map<String, Object>> accounts = ibkMenuService.extractAccountsData(driver);
-
-            // 4. ✅ Retornar resultados
+            // 3. ✅ Retornar resultados
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
             result.put("data", accounts);
             result.put("count", accounts.size());
@@ -208,47 +203,44 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     }
 
     public Map<String, Object> obtenerMovimientos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin) {
-        Map<String, Object> result;
+        Map<String, Object> result = null;
         log.info("Obteniendo movimientos IBK, transactionId: {}, cuenta: {}, fechaInicio: {}, fechaFin: {}",
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            WebDriver driver = driverCache.get(transactionId);
-
-            if (driver == null) {
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session == null) {
                 throw new SessionNotFoundException("Sesión no encontrada");
             }
+            Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Movimientos" del menú lateral
-            if (!ibkMenuService.clickMovimientos(driver)) {
+            if (!ibkMenuService.clickMovimientos(page)) {
                 throw new IbkException("No se pudo navegar a movimietnos",
                         "IBK_NAVIGATION_ERROR",
                         "No se pudo acceder a la sección de movimientos");
             }
 
-            // 2. ✅ Esperar a que cargue la página de resumen
-            ibkMenuService.waitForMovementsToLoad(driver);
-
             // 3. ✅ Seleccionar la cuenta específica
-            if (!ibkMenuService.selectCuenta(driver, numeroCuenta)) {
+            if (!ibkMenuService.selectCuenta(page, numeroCuenta)) {
                 throw new IbkException("No se pudo seleccionar la cuenta",
                         "IBK_ACCOUNT_NOT_FOUND",
                         "La cuenta " + numeroCuenta + " no fue encontrada");
             }
 
             // 4. ✅ Configurar rango de fechas
-            if (!ibkMenuService.setDateRange(driver, fechaInicio, fechaFin)) {
+            if (!ibkMenuService.setDateRange(page, fechaInicio, fechaFin)) {
                 throw new IbkException("No se pudo configurar el rango de fechas",
                         "IBK_DATE_RANGE_ERROR",
                         "Error al establecer fechas: " + fechaInicio + " - " + fechaFin);
             }
 
             // 5. ✅ Aplicar filtros y esperar resultados
-            ibkMenuService.applyFilters(driver);
-            ibkMenuService.waitForMovimientosToLoad(driver);
+            ibkMenuService.applyFilters(page);
+            ibkMenuService.waitForMovimientosToLoad(page);
 
             // 6. ✅ Extraer datos de movimientos
-            List<Map<String, Object>> movimientos = ibkMenuService.extractMovimientosData(driver);
+            List<Map<String, Object>> movimientos = ibkMenuService.extractMovimientosData(page);
 
             // 7. ✅ Retornar resultados
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Movimientos obtenidos exitosamente", true);
@@ -267,45 +259,45 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     }
 
     public Map<String, Object> logout(String transactionId) {
-        WebDriver driver = driverCache.get(transactionId);
-
-        if (driver == null) {
-            throw new BcpException("Sesión no encontrada",
-                    "IBK_SESSION_NOT_FOUND",
-                    "La sesión con ID " + transactionId + " no existe o ya fue cerrada");
+        NavigatorSession session = navigatorSessionCache.get(transactionId);
+        if (session == null) {
+            throw new SessionNotFoundException("Sesión no encontrada");
         }
+        Page page = session.page();
 
         try {
-            log.info("Iniciando proceso de logout para transactionId: {}", transactionId);
+            log.info("Iniciando proceso de logout del ibk para transactionId: {}", transactionId);
 
             // 1. ✅ ABRIR EL DROPDOWN DE PERFIL (si no está visible)
-            ibkMenuService.openProfileDropdown(driver);
+            ibkMenuService.openProfileDropdown(page);
 
             // 2. ✅ HACER CLICK EN "CERRAR SESIÓN"
-            ibkMenuService.clickLogoutButton(driver);
+            ibkMenuService.clickLogoutButton(page);
 
             // 3. ✅ MODAL CUANDO SE MUESTRA
-            ibkMenuService.handleNpsSurvey(driver);
+            ibkMenuService.handleNpsSurvey(page);
 
             // 4. ✅ VERIFICAR QUE EL LOGOUT FUE EXITOSO
-            boolean logoutSuccess = ibkMenuService.verifyLogoutSuccess(driver);
+            boolean logoutSuccess = ibkMenuService.verifyLogoutSuccess(page);
 
             if (!logoutSuccess) {
                 log.warn("No se pudo verificar logout exitoso, cerrando navegador directamente");
             }
 
-            // 5. ✅ CERRAR EL DRIVER
-            driver.quit();
+            // 5. ✅ Cerrar contexto/navegador
+            page.context().close(); // cierra el contexto de esta sesión
             log.debug("Driver cerrado exitosamente");
 
         } catch (Exception e) {
             log.error("Error durante logout: {}", e.getMessage());
-
-            driver.quit();
-
-            throw new BcpException("Error en logout", "IBK_LOGOUT_ERROR", e.getMessage());
+            try {
+                page.context().close();
+            } catch (Exception ex) {
+                log.warn("Error al cerrar contexto: {}", ex.getMessage());
+            }
+            throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
         } finally {
-            driverCache.remove(transactionId);
+            navigatorSessionCache.remove(transactionId);
             log.info("Sesión {} removida del cache", transactionId);
         }
 
@@ -315,184 +307,167 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     /**
      * Selecciona metodo de ingreso de credenciales
      *
-     * @param driver manejador de pagina
+     * @param page manejador de pagina
      * @param selectorValue Valor para seleccioanr metodo de ingreso
      */
-    private void selectLoginDocumentType(WebDriver driver, String selectorValue) {
+    private void selectLoginDocumentType(Page page, String selectorValue) {
         if (selectorValue == null || selectorValue.isBlank()) {
-            return; // DNI queda como default
+            return;
         }
 
         String normalized = selectorValue.trim().toUpperCase(Locale.ROOT);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+        int timeoutMs = 8_000;
 
         switch (normalized) {
             case "TIE":
                 // Cambiar a la pestaña TIE
-                WebElement tieToggle = wait.until(ExpectedConditions.elementToBeClickable(
-                        By.xpath("//mat-button-toggle[.//span[contains(normalize-space(.),'TIE')]]//button")
-                ));
-                tieToggle.click();
+                Locator loc = MetodsGeneric.waitForVisible(page, "//mat-button-toggle[.//span[contains(normalize-space(.),'TIE')]]//button", timeoutMs);
+                MetodsGeneric.clickWithFallback(page, loc, timeoutMs);
                 break;
 
             case "DNI":
-                ensureDocIdentidadToggle(wait);
+                ensureDocIdentidadToggle(page, timeoutMs);
                 break;
 
             case "CE":
-                ensureDocIdentidadToggle(wait);
-                selectMatOption(wait, "CE");
+                ensureDocIdentidadToggle(page, timeoutMs);
+                selectMatOption(page, "CE");
                 break;
 
             case "PAS":
-                ensureDocIdentidadToggle(wait);
-                selectMatOption(wait, "Pasaporte");
+                ensureDocIdentidadToggle(page, timeoutMs);
+                selectMatOption(page, "Pasaporte");
                 break;
 
             default:
-                ensureDocIdentidadToggle(wait);
+                ensureDocIdentidadToggle(page, timeoutMs);
                 break;
         }
     }
 
     /**
      * Hace clic en la pestaña de documento
-     * @param wait tiempo de espera para ver si responde el elemento de la pagina
+     * @param page manejador de pagina
+     * @param timeoutMs tiempo de espera
      */
-    private void ensureDocIdentidadToggle(WebDriverWait wait) {
-        WebElement docToggle = wait.until(ExpectedConditions.elementToBeClickable(
-                By.xpath("//mat-button-toggle[.//span[contains(normalize-space(.),'Doc. Identidad')]]//button")
-        ));
-        if (!Boolean.parseBoolean(docToggle.getDomAttribute("aria-pressed"))) {
-            docToggle.click();
+    private void ensureDocIdentidadToggle(Page page, int timeoutMs) {
+        Locator docToggle = MetodsGeneric.waitForVisible(page, "//mat-button-toggle[.//span[contains(normalize-space(.),'Doc. Identidad')]]//button", timeoutMs);
+        String ariaPressed = docToggle.getAttribute("aria-pressed");
+        boolean isPressed = Boolean.parseBoolean(ariaPressed);
+        if (!isPressed) {
+            MetodsGeneric.clickWithFallback(page, docToggle, timeoutMs);
         }
     }
 
     /**
      *  Selecciona la opcion de documento correspondiente
      *
-     * @param wait  tiempo de espera para ver si responde el elemento de la página
+     * @param page  manejador de pagina
      * @param optionText texto normalizado para obtener valor de seleccion
      */
-    private void selectMatOption(WebDriverWait wait, String optionText) {
-        WebElement matSelect = wait.until(ExpectedConditions.elementToBeClickable(
-                By.cssSelector("mat-select[data-test='cmbTypeDoc']")
-        ));
-        matSelect.click();
+    private void selectMatOption(Page page, String optionText) {
+        int timeoutMs = 8_000;
 
-        WebElement option = wait.until(ExpectedConditions.elementToBeClickable(
-                By.xpath(String.format("//mat-option//span[contains(normalize-space(.),'%s')]", optionText))
-        ));
-        option.click();
+        // 1) Abrir el mat-select
+        Locator matSelect = MetodsGeneric.waitForVisible(page, "mat-select[data-test='cmbTypeDoc']", timeoutMs);
+        MetodsGeneric.clickWithFallback(page, matSelect, timeoutMs);
 
-        wait.until(ExpectedConditions.invisibilityOfElementLocated(
-                By.cssSelector(".cdk-overlay-pane .mat-mdc-select-panel")
-        ));
+        // 2) Elegir la opción por texto
+        Locator option = MetodsGeneric.waitForVisible(page, String.format(
+                "//mat-option//span[contains(normalize-space(.),'%s')]",
+                optionText), timeoutMs);
+        MetodsGeneric.clickWithFallback(page, option, timeoutMs);
+
+        // 3) Esperar a que cierre el panel del overlay
+        Locator panel = page.locator(".cdk-overlay-pane .mat-mdc-select-panel");
+        panel.waitFor(new Locator.WaitForOptions()
+                .setState(WaitForSelectorState.HIDDEN)
+                .setTimeout(timeoutMs));
     }
 
     /**
      * Ingresa el código del usuario en este caso número de tarjeta
      *
-     * @param driver manejador de pagina
+     * @param page manejador de pagina
      * @param docSelector para saber en qué objeto ingresará valores de logueo
      * @param userValue código de usuario o número de tarjeta
      */
-    private void enterUserCode(WebDriver driver, String docSelector, String userValue) {
+    private void enterUserCode(Page page, String docSelector, String userValue) {
         log.info("Ingresando tarjeta/código de usuario...");
 
         try {
             if (userValue == null || userValue.isBlank()) {
-                throw new BcpException("El identificador de usuario no puede estar vacío",
+                throw new IbkException("El identificador de usuario no puede estar vacío",
                         "IBK_EMPTY_USER",
                         "Ingresa el usuario o número de documento para continuar");
             }
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+            int timeoutMs = 8_000;
             String normalizedSelector = docSelector == null ? "" : docSelector.trim().toUpperCase(Locale.ROOT);
 
+            Locator input;
             if ("TIE".equals(normalizedSelector)) {
-                By tieInputLocator = By.cssSelector("input#txtTie[data-test='txtTie']");
-                WebElement tieInput = wait.until(ExpectedConditions.visibilityOfElementLocated(tieInputLocator));
-                tieInput.clear();
-                MetodsGeneric.humanTypeText(tieInput, userValue.trim());
+                input = MetodsGeneric.waitForVisible(page, "input#txtTie[data-test='txtTie']", timeoutMs);
             } else {
-                By docInputLocator = By.cssSelector("input#login-doc[data-test='txtNumDoc']");
-                WebElement docInput = wait.until(ExpectedConditions.visibilityOfElementLocated(docInputLocator));
-                docInput.clear();
-                MetodsGeneric.humanTypeText(docInput, userValue.trim());
+                input = MetodsGeneric.waitForVisible(page, "input#login-doc[data-test='txtNumDoc']", timeoutMs);
             }
-        } catch (TimeoutException e) {
-            throw BcpException.elementNotFound("input login", "input user");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "IBK_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+
+            input.fill("", new Locator.FillOptions().setTimeout(timeoutMs));
+
+            MetodsGeneric.humanTypeText(input, userValue.trim(), 45, 110);
+        } catch (TimeoutError e) {
+            throw IbkException.elementNotFound("input login", "input user");
         } catch (Exception e) {
-            throw new BcpException("Error al aplicar tabs de navegación",
+            throw new IbkException("Error al aplicar tabs de navegación",
                     "IBK_NAVIGATION_ERROR",
                     "Error en la navegación del portal del banco");
         }
     }
 
     /**
-     * Ubica un elemento en la página
-     *
-     * @param driver manejador de página
-     * @param locator etiqueta a buscar
-     * @return {@link WebElement}
-     */
-    private WebElement waitForElement(WebDriver driver, By locator) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-        return wait.until(ExpectedConditions.visibilityOfElementLocated(locator));
-    }
-
-    /**
      * Ingresa el password en la caja de contraseña
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @param password contraseña a ingresar
      */
-    private void enterPassword(WebDriver driver, String docSelector, String password) {
+    private void enterPassword(Page page, String docSelector, String password) {
         log.info("Ingresando clave de {} dígitos...", password.length());
 
         try {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
-        String normalizedSelector = docSelector == null ? "" : docSelector.trim().toUpperCase(Locale.ROOT);
+            int timeoutMs = 8_000;
+            String normalizedSelector = docSelector == null ? "" : docSelector.trim().toUpperCase(Locale.ROOT);
 
         if ("TIE".equals(normalizedSelector)) {
-            By tiePasswordLocator = By.cssSelector("input#passwordTie[data-test='txtPassword']");
-            WebElement tiePasswordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(tiePasswordLocator));
+            Locator tiePasswordInput = MetodsGeneric.waitForVisible(page, "input#passwordTie[data-test='txtPassword']", timeoutMs);
+            MetodsGeneric.clickWithFallback(page, tiePasswordInput, timeoutMs);
+            MetodsGeneric.randomWaitPage(page, 200, 350);
 
-            tiePasswordInput.click();
-            MetodsGeneric.randomWait(200, 350);
-
-            Map<String, WebElement> keyMap = mapVirtualKeyboard(driver);
+            Map<String, Locator> keyMap = mapVirtualKeyboard(page);
 
             for (char ch : password.toCharArray()) {
                 String key = String.valueOf(ch);
-                WebElement keyButton = keyMap.get(key.toUpperCase(Locale.ROOT));
+                Locator keyButton = keyMap.get(key.toUpperCase(Locale.ROOT));
                 if (keyButton == null) {
                     throw new IbkException("Carácter no disponible en teclado virtual: " + ch,
                             "IBK_KEY_NOT_FOUND",
                             "El teclado no contiene la tecla " + ch);
                 }
-                clickVirtualKey(driver, keyButton, key);
+                clickVirtualKey(page, keyButton, key);
             }
 
             log.info("Clave TIE ingresada exitosamente mediante teclado virtual");
 
         } else {
-            By docPasswordLocator = By.cssSelector("input#passwordDoc[data-test='txtPassword']");
-            WebElement docPasswordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(docPasswordLocator));
+            Locator docPasswordInput = MetodsGeneric.waitForVisible(page, "input#passwordDoc[data-test='txtPassword']", timeoutMs);
+            String readonly = docPasswordInput.getAttribute("readonly");
 
-            if ("true".equalsIgnoreCase(docPasswordInput.getDomAttribute("readonly"))) {
-                ((JavascriptExecutor) driver).executeScript("arguments[0].removeAttribute('readonly');", docPasswordInput);
+            if ("true".equalsIgnoreCase(readonly)) {
+                page.evaluate("el => el.removeAttribute('readonly')", docPasswordInput);
             }
 
-            docPasswordInput.click();
-            docPasswordInput.clear();
-            MetodsGeneric.humanTypeText(docPasswordInput, password.trim());
+            MetodsGeneric.clickWithFallback(page, docPasswordInput, timeoutMs);
+            docPasswordInput.fill("", new Locator.FillOptions().setTimeout(timeoutMs));
+            MetodsGeneric.humanTypeText(docPasswordInput, password.trim(), 200, 400);
 
             log.info("Clave ingresada exitosamente en campo de texto");
         }
@@ -509,38 +484,40 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     /**
      * Mapea teclado virtual
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link Map}
      */
-    private Map<String, WebElement> mapVirtualKeyboard(WebDriver driver) {
+    private Map<String, Locator> mapVirtualKeyboard(Page page) {
         log.info("Mapeando teclado virtual del IBK...");
 
-        Map<String, WebElement> keyMap = new HashMap<>();
+        Map<String, Locator> keyMap = new HashMap<>();
 
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(6));
-            WebElement keyboard = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("ibk-keyboard[data-test='tblKeyboard']")
-            ));
+            int timeoutMs = 6_000;
 
-            List<WebElement> keys = keyboard.findElements(By.cssSelector(
+            Locator keyboard = MetodsGeneric.waitForVisible(page, "ibk-keyboard[data-test='tblKeyboard']", timeoutMs);
+
+            Locator keys = keyboard.locator(
                     "ibk-button.ibk-keyboard__btn:not(.ibk-keyboard__btn--reset):not(.ibk-keyboard__btn--delete) > button"
-            ));
+            );
 
-            for (WebElement button : keys) {
-                String dataTest = button.getDomAttribute("data-test");
+            int count = keys.count();
+            for (int i = 0; i < count; i++) {
+                Locator button = keys.nth(i);
+
+                String dataTest = button.getAttribute("data-test");
                 if ("btnLoad".equalsIgnoreCase(dataTest)) {
                     continue;
                 }
 
-                String rawLabel = processKeyboardKey(driver, button);
+                String rawLabel = processKeyboardKey(page, button);
                 if (rawLabel == null || rawLabel.isBlank()) {
                     log.debug("Botón omitido por carecer de etiqueta resoluble: {}", button);
                     continue;
                 }
 
                 String normalizedKey = rawLabel.trim().toUpperCase(Locale.ROOT);
-                WebElement previous = keyMap.putIfAbsent(normalizedKey, button);
+                Locator previous = keyMap.putIfAbsent(normalizedKey, button);
                 if (previous != null) {
                     log.warn("Clave duplicada en teclado virtual: {}", normalizedKey);
                 }
@@ -552,21 +529,21 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
 
             return keyMap;
 
-        } catch (TimeoutException e) {
+        } catch (TimeoutError e) {
             log.error("Timeout buscando teclado virtual: {}", e.getMessage(), e);
-            throw new BcpException("Timeout teclado virtual",
+            throw new IbkException("Timeout teclado virtual",
                     "IBK_KEYBOARD_TIMEOUT",
                     "No se pudo encontrar el teclado virtual en el tiempo esperado");
 
         } catch (Exception e) {
             log.error("Error mapeando teclado virtual: {}", e.getMessage(), e);
-            throw new BcpException("Error mapeando teclado virtual",
+            throw new IbkException("Error mapeando teclado virtual",
                     "IBK_KEYBOARD_MAPPING_ERROR",
                     "Error al procesar el teclado del banco: " + e.getMessage());
         }
     }
 
-    private String processKeyboardKey(WebDriver driver, WebElement button) {
+    private String processKeyboardKey(Page page, Locator button) {
         try {
             String label = firstNonBlankAttribute(button, "aria-label", "data-key", "value");
             if (!label.isBlank()) {
@@ -578,8 +555,10 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
                 return svgValue.get();
             }
 
-            String fallback = (String) ((JavascriptExecutor) driver)
-                    .executeScript("return arguments[0].textContent && arguments[0].textContent.trim();", button);
+            String fallback = page.evaluate(
+                    "el => (el.textContent && el.textContent.trim()) || ''",
+                    button
+            ).toString();
             return Optional.ofNullable(fallback).orElse("");
 
         } catch (Exception e) {
@@ -588,10 +567,13 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         }
     }
 
-    private Optional<String> resolveKeyFromSvg(WebElement button) {
-        List<WebElement> paths = button.findElements(By.cssSelector("svg path[d]"));
-        for (WebElement path : paths) {
-            String dAttribute = path.getDomAttribute("d");
+    private Optional<String> resolveKeyFromSvg(Locator button) {
+        Locator paths = button.locator("svg path[d]");
+        int pathCount = paths.count();
+
+        for (int i = 0; i < pathCount; i++) {
+            Locator path = paths.nth(i);
+            String dAttribute = path.getAttribute("d");
             if (dAttribute == null || dAttribute.isBlank()) {
                 continue;
             }
@@ -608,9 +590,9 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         return Optional.empty();
     }
 
-    private String firstNonBlankAttribute(WebElement element, String... attributes) {
+    private String firstNonBlankAttribute(Locator element, String... attributes) {
         for (String attribute : attributes) {
-            String value = element.getDomAttribute(attribute);
+            String value = element.getAttribute(attribute);
             if (value != null && !value.isBlank()) {
                 return value;
             }
@@ -621,27 +603,24 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     /**
      * Hacer clic en cada dígito de la contraseña
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @param keyButton indice de tecla
      * @param keyLabel valor del boton
      */
-    private void clickVirtualKey(WebDriver driver, WebElement keyButton, String keyLabel) {
+    private void clickVirtualKey(Page page, Locator keyButton, String keyLabel) {
         try {
-            new WebDriverWait(driver, Duration.ofSeconds(4))
-                    .until(ExpectedConditions.elementToBeClickable(keyButton));
-            keyButton.click();
+            keyButton.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(4_000));
+            MetodsGeneric.clickWithFallback(page, keyButton, 4_000);
+
             log.debug("Click en tecla '{}'", keyLabel);
 
-            MetodsGeneric.randomWait(300, 500);
+            MetodsGeneric.randomWaitPage(page, 300, 500);
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "IBK_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error haciendo click en tecla '{}': {}", keyLabel, e.getMessage());
-            throw new BcpException("Error al hacer click en tecla virtual",
+            throw new IbkException("Error al hacer click en tecla virtual",
                     "IBK_KEY_CLICK_ERROR",
                     "Error al interactuar con el teclado del banco");
         }
@@ -650,27 +629,22 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
     /**
      * Hace clic en el boton de ingresar
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      */
-    private void clickLoginButton(WebDriver driver) {
+    private void clickLoginButton(Page page) {
         log.info("Haciendo click en botón de login...");
 
         try {
-            WebElement loginButton = waitForElement(driver,By.xpath("//button//span[normalize-space()='Iniciar sesión']"));
-
-            loginButton.click();
+            int timeoutMs = 8_000;
+            Locator loginButton = MetodsGeneric.waitForVisible(page, "//button//span[normalize-space()='Iniciar sesión']", timeoutMs);
+            MetodsGeneric.clickWithFallback(page, loginButton, timeoutMs);
             log.info("Click en botón de login realizado");
 
-            MetodsGeneric.randomWait(2500, 3500);
+            MetodsGeneric.randomWaitPage(page, 2500, 3500);
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "IBK_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error haciendo click en botón login: {}", e.getMessage());
-            throw new BcpException("Error al hacer click en botón de login",
+            throw new IbkException("Error al hacer click en botón de login",
                     "IBK_LOGIN_BUTTON_ERROR",
                     "Error al enviar el formulario de login");
         }

@@ -3,7 +3,6 @@ package com.raissa.rpa.controller.alfin;
 import com.raissa.rpa.domain.entity.RequestInformation;
 import com.raissa.rpa.domain.entity.Session;
 import com.raissa.rpa.exception.AlfinException;
-import com.raissa.rpa.exception.BbvaException;
 import com.raissa.rpa.service.alfin.ALFINEmpresaService;
 import com.raissa.rpa.service.commons.LoggingService;
 import com.raissa.rpa.service.commons.ValidationService;
@@ -12,7 +11,6 @@ import com.raissa.rpa.util.ResponseGeneric;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.NoSuchElementException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -153,14 +151,6 @@ public class ALFINEmpresaController {
             log.info("Movimientos ALFIN obtenido exitosamente, transactionId: {}", transactionId);
 
             return ResponseEntity.ok(resp);
-
-        } catch (NoSuchElementException e) {
-            log.error("Error obteniendo movimientos ALFIN: {}", e.getMessage());
-
-            loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
-            Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
-
-            return ResponseEntity.badRequest().body(errorResponse);
         } catch (Exception e) {
             log.error("Error  ALFIN: {}", e.getMessage());
 

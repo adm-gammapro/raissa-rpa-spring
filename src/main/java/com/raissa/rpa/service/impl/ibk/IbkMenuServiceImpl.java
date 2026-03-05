@@ -1,170 +1,126 @@
 package com.raissa.rpa.service.impl.ibk;
 
-import com.raissa.rpa.exception.BcpException;
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.WaitForSelectorState;
 import com.raissa.rpa.exception.IbkException;
 import com.raissa.rpa.service.ibk.IbkMenuService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.ElementNotInteractableException;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.NoSuchElementException;
-import org.openqa.selenium.SearchContext;
-import org.openqa.selenium.StaleElementReferenceException;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.interactions.Actions;
-import org.openqa.selenium.support.ui.ExpectedCondition;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Service
 @Slf4j
 public class IbkMenuServiceImpl implements IbkMenuService {
-    public boolean verifyLoginSuccess(WebDriver driver) {
+    public boolean verifyLoginSuccess(Page page) {
         log.info("Verificando si el login fue exitoso...");
 
         try {
-            return waitAndVerifyLoginSuccess(driver);
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-            return false;
+            log.debug("Esperando estabilización de la página post-login...");
+            MetodsGeneric.randomWaitPage(page, 2_500, 3_500);
+
+            Locator sideMenu = MetodsGeneric.waitForAttached(page, "ibk-menu-sidebar-desktop", 5_000);
+
+            boolean exists = sideMenu.count() > 0;
+            log.info("Menú lateral encontrado y visible: {}", exists);
+
+            return exists;
+        } catch (TimeoutError e) {
+            log.error("Timeout esperando que cargue la pagina de IBK: {}", e.getMessage(), e);
+            throw new IbkException("Timeout",
+                    "IBK_TIMEOUT",
+                    "No se cargo la pagina en el tiempo esperado");
         } catch (Exception e) {
             log.error("Error inesperado verificando login: {}", e.getMessage());
             return false;
         }
     }
 
-    public boolean closeCampaignPopupIfPresent(WebDriver driver) {
-        By overlay = By.cssSelector("div.overlay_web");
-        By closeButton = By.cssSelector("#popup__cerrar.popup__close_web");
+    public boolean closeCampaignPopupIfPresent(Page page) {
+        String overlaySelector = "div.overlay_web";
+        String closeButtonSelector = "#popup__cerrar.popup__close_web";
+        int timeoutMs = 5_000;
 
-        // Si no hay overlay, no hacemos nada
-        if (driver.findElements(overlay).isEmpty()) {
-            log.debug("No se encontró popup de campaña");
-            return false;
-        }
-
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
         try {
-            WebElement overlayEl = wait.until(ExpectedConditions.visibilityOfElementLocated(overlay));
-            WebElement closeEl = wait.until(ExpectedConditions.elementToBeClickable(closeButton));
-
-            try {
-                closeEl.click();
-                log.debug("Popup cerrado con click estándar");
-            } catch (ElementNotInteractableException e) {
-                JavascriptExecutor js = (JavascriptExecutor) driver;
-                js.executeScript("arguments[0].click();", closeEl);
-                log.debug("Popup cerrado vía JavaScript (fallback)");
+            if (page.locator(overlaySelector).count() == 0) {
+                log.debug("No se encontró popup de campaña");
+                return false;
             }
 
-            wait.until(ExpectedConditions.invisibilityOf(overlayEl));
+            Locator overlayEl = MetodsGeneric.waitForAttached(page, overlaySelector, timeoutMs);
+            if (!overlayEl.isVisible()) {
+                log.debug("Overlay existe pero no está visible");
+                return false;
+            }
+
+            Locator closeEl = MetodsGeneric.waitForVisible(page, closeButtonSelector, timeoutMs);
+
+            MetodsGeneric.clickWithFallback(page, closeEl, timeoutMs);
+            log.debug("Popup cerrado (click estándar o fallback JS)");
+
+            MetodsGeneric.waitForHidden(overlayEl, timeoutMs);
+
             log.info("Overlay de campaña cerrado correctamente");
             return true;
 
-        } catch (TimeoutException e) {
-            log.warn("Timeout esperando cerrar el popup de campaña: {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error esperando el popup de campaña: {}", e.getMessage());
             return false;
         }
     }
 
-    public boolean clickConsultas(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
+    public boolean clickConsultas(Page page) {
+        int timeoutMs = 5_000;
         try {
-            WebElement consultasHeader = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//nav[contains(@class,'nav-main')]//div[contains(@class,'menu-buttons__button') and .//div[contains(normalize-space(),'Consultas')]]")
-            ));
-            clickWithFallback(driver, consultasHeader);
-
-            WebElement cuentasPanel = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//ul[contains(@class,'websidenav-submenu')][@data-test='ulCuentas']")
-            ));
-
-            WebElement saldosLink = cuentasPanel.findElement(
-                    By.xpath(".//a[contains(@class,'websidenav-submenu__link')][normalize-space()='Saldos']")
+            Locator saldosLink = MetodsGeneric.waitForAttached(
+                    page,
+                    "a[data-test='lnksaldos']",
+                    timeoutMs
             );
-            clickWithFallback(driver, saldosLink);
+
+            MetodsGeneric.clickJsFallback(page, saldosLink);
+
+            page.waitForURL("**/consultas/saldos", new Page.WaitForURLOptions().setTimeout(timeoutMs));
 
             return true;
-        } catch (TimeoutException | NoSuchElementException e) {
+        } catch (Exception e) {
             return false;
         }
     }
 
-    public void waitForAccountsToLoad(WebDriver driver) {
-        try {
-            log.debug("Esperando a que carguen los datos de cuentas...");
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//ibk-companie-balance//ibk-card-header[normalize-space()='Cuentas']")
-            ));
-
-            wait.until(drv -> {
-                try {
-                    WebElement enterprise = drv.findElement(
-                            By.cssSelector("ibk-companie-balance [data-test='lblEnterprise']")
-                    );
-                    return !enterprise.getText().trim().isEmpty();
-                } catch (NoSuchElementException | StaleElementReferenceException ex) {
-                    return false;
-                }
-            });
-
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("ibk-companie-balance ibk-table[data-test='tblAccount'] ibk-table-row.ng-star-inserted")
-            ));
-            wait.until(drv -> drv.findElements(
-                    By.cssSelector("ibk-companie-balance span[data-test='lblAmount']")
-            ).stream().anyMatch(el -> el.getText().matches(".*\\d")));
-
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-        } catch (TimeoutException e) {
-            log.warn("Timeout esperando carga de cuentas (desktop): {}", e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            log.warn("Error esperando carga de cuentas (desktop): {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    public List<Map<String, Object>> extractAccountsData(WebDriver driver) {
+    public List<Map<String, Object>> extractAccountsData(Page page) {
         List<Map<String, Object>> accounts = new ArrayList<>();
 
         try {
             log.debug("Extrayendo datos reales de cuentas (desktop)...");
+            int timeoutMs = 15_000;
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
-
-            WebElement dataTable = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("ibk-companie-balance ibk-table[data-test='tblAccount']")
-            ));
-
-            List<WebElement> accountRows = dataTable.findElements(
-                    By.cssSelector("ibk-table-body ibk-table-row.ng-star-inserted")
+            Locator dataTable = MetodsGeneric.waitForVisible(
+                    page,
+                    "ibk-companie-balance ibk-table[data-test='tblAccount']",
+                    timeoutMs
             );
 
-            log.debug("Encontradas {} filas de cuentas (desktop)", accountRows.size());
+            Locator accountRows = dataTable.locator("ibk-table-body ibk-table-row.ng-star-inserted");
+            int rowCount = accountRows.count();
 
-            for (WebElement row : accountRows) {
+            log.debug("Encontradas {} filas de cuentas (desktop)", rowCount);
+
+            for (int i = 0; i < rowCount; i++) {
+                Locator row = accountRows.nth(i);
                 Map<String, Object> accountData = extractAccountFromRow(row);
+
                 if (!accountData.isEmpty()) {
                     accounts.add(accountData);
                     log.debug("Cuenta extraída: {}", accountData.get(Constantes.KEY_NUMERO_CUENTA));
@@ -173,7 +129,7 @@ public class IbkMenuServiceImpl implements IbkMenuService {
 
             return accounts;
 
-        } catch (TimeoutException e) {
+        } catch (TimeoutError e) {
             log.error("Timeout localizando tabla de cuentas: {}", e.getMessage());
             return accounts;
         } catch (Exception e) {
@@ -182,262 +138,233 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         }
     }
 
-    public boolean clickMovimientos(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+    public boolean clickMovimientos(Page page) {
+        int timeoutMs = 5_000;
 
         try {
-            WebElement consultasHeader = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//nav[contains(@class,'nav-main')]//div[contains(@class,'menu-buttons__button') and .//div[contains(normalize-space(),'Consultas')]]")
-            ));
-            clickWithFallback(driver, consultasHeader);
-
-            WebElement cuentasPanel = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//ul[contains(@class,'websidenav-submenu')][@data-test='ulCuentas']")
-            ));
-
-            WebElement movimientosLink = cuentasPanel.findElement(
-                    By.xpath(".//a[contains(@class,'websidenav-submenu__link')][normalize-space()='Movimientos']")
+            Locator movimientosLink = MetodsGeneric.waitForAttached(
+                    page,
+                    "a[data-test='lnkmovimientos']",
+                    timeoutMs
             );
-            clickWithFallback(driver, movimientosLink);
+
+            MetodsGeneric.clickJsFallback(page, movimientosLink);
+
+            if (!closeCampaignPopupIfPresent(page)) {
+                log.info("No hay popup que cerrar");
+            }
+
+            page.waitForURL("**/consultas/movimientos/historial/",
+                    new Page.WaitForURLOptions().setTimeout(timeoutMs));
 
             return true;
-        } catch (TimeoutException | NoSuchElementException e) {
+        } catch (Exception e) {
             return false;
         }
     }
 
-    public void waitForMovementsToLoad(WebDriver driver) {
+    public boolean selectCuenta(Page page, String numeroCuenta) {
         try {
-            log.debug("Esperando a que carguen los datos de movimientos...");
-
-            MetodsGeneric.randomWait(2000,4000);
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//ibk-history-filter//ibk-headline-title[normalize-space()='Movimientos']")
-            ));
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-        } catch (TimeoutException e) {
-            log.warn("Timeout esperando carga de movimietnos de cuentas (desktop): {}", e.getMessage());
-            throw e;
-        } catch (Exception e) {
-            log.warn("Error esperando carga de movimientos de cuentas (desktop): {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    public boolean selectCuenta(WebDriver driver, String numeroCuenta) {
-        try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            int timeoutMs = 5_000;
             String displayedAccount = formatAccountForDropdown(numeroCuenta);
 
             // 1) Abrir el combo de cuentas si está colapsado.
-            WebElement selectTrigger = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.cssSelector("mat-select[data-test='cmbAccount']")
-            ));
-            if ("false".equalsIgnoreCase(selectTrigger.getDomAttribute("aria-expanded"))) {
-                selectTrigger.click();
+            Locator selectTrigger = MetodsGeneric.waitForVisible(
+                    page,
+                    "mat-select[data-test='cmbAccount']",
+                    timeoutMs
+            );
+            String expanded = selectTrigger.getAttribute("aria-expanded");
+            if (!"true".equalsIgnoreCase(expanded)) {
+                MetodsGeneric.clickWithFallback(page, selectTrigger, timeoutMs);
             }
 
             // 2) Esperar el panel de opciones.
-            By panelLocator = By.cssSelector("div.mat-mdc-select-panel.mdc-menu-surface--open");
-            WebElement panel = wait.until(ExpectedConditions.visibilityOfElementLocated(panelLocator));
+            Locator panel = MetodsGeneric.waitForVisible(
+                    page,
+                    "div.mat-mdc-select-panel.mdc-menu-surface--open",
+                    timeoutMs
+            );
 
             // 3) Encontrar la opción cuyo texto contiene el número de cuenta con guion.
-            By optionLocator = By.xpath(
-                    ".//mat-option//div[contains(@class,'ibk-label-account-select')][contains(normalize-space(), '" + displayedAccount + "')]"
-            );
-            WebElement option = wait.until(ExpectedConditions.elementToBeClickable(panel.findElement(optionLocator)));
+            Locator option = panel
+                    .locator("mat-option .ibk-label-account-select")
+                    .filter(new Locator.FilterOptions().setHasText(displayedAccount))
+                    .first();
 
-            ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'});", option);
-            option.click();
+            option.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(timeoutMs));
+
+            option.scrollIntoViewIfNeeded();
+            MetodsGeneric.clickWithFallback(page, option, timeoutMs);
 
             // 4) Esperar a que el panel se cierre.
-            wait.until(ExpectedConditions.invisibilityOf(panel));
+            MetodsGeneric.waitForHidden(panel, timeoutMs);
 
-            MetodsGeneric.randomWait(2000, 3000);
+            MetodsGeneric.randomWaitPage(page, 2_000, 3_000);
 
             log.debug("Cuenta {} seleccionada correctamente", numeroCuenta);
             return true;
-
-        } catch (TimeoutException e) {
-            log.warn("Timeout seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
-            return false;
         } catch (Exception e) {
             log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
             return false;
         }
     }
 
-    public boolean setDateRange(WebDriver driver, String fechaInicio, String fechaFin) {
+    public boolean setDateRange(Page page, String fechaInicio, String fechaFin) {
         log.info("Iniciando carga de rango de fechas (histórico)");
         try {
-            MetodsGeneric.randomWait(2000, 3000);
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+            MetodsGeneric.randomWaitPage(page, 2_000, 3_000);
+            int timeoutMs = 8_000;
 
             // 1) Esperar el contenedor del datepicker
-            WebElement rangeContainer = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("ibk-historical-date ibk-datepicker-range-v2")
-            ));
+            Locator rangeContainer = MetodsGeneric.waitForVisible(
+                    page,
+                    "ibk-historical-date ibk-datepicker-range-v2",
+                    timeoutMs
+            );
 
             // 2) Inputs desde/hasta (identificados por data-mat-calendar)
-            List<WebElement> visibleInputs = wait.until(drv -> {
-                List<WebElement> inputs = rangeContainer.findElements(
-                        By.cssSelector("input.mat-datepicker-input[data-mat-calendar]")
-                );
-                List<WebElement> displayed = inputs.stream()
-                        .filter(WebElement::isDisplayed)
-                        .collect(Collectors.toList());
-                return displayed.size() >= 2 ? displayed : null;
-            });
-
-            WebElement fechaInicioInput = visibleInputs.get(0);
-            WebElement fechaFinInput = visibleInputs.get(1);
-
-            // 3) Setear valores via JS y disparar eventos
-            JavascriptExecutor js = (JavascriptExecutor) driver;
-            setInputValue(js, fechaInicioInput, fechaInicio);
-            setInputValue(js, fechaFinInput, fechaFin);
-
-            MetodsGeneric.randomWait(500, 800);
-
-            // 4) Opcional: verificar que los inputs reflejan el valor
-            if (!fechaInicio.equals(fechaInicioInput.getAttribute("value"))) {
-                log.warn("El campo inicio no reflejó el valor esperado: {}", fechaInicioInput.getAttribute("value"));
+            Locator inputs = rangeContainer.locator("input.mat-datepicker-input[data-mat-calendar]");
+            long end = System.currentTimeMillis() + timeoutMs;
+            while (System.currentTimeMillis() < end) {
+                if (inputs.count() >= 2) break;
+                page.waitForTimeout(150);
             }
-            if (!fechaFin.equals(fechaFinInput.getAttribute("value"))) {
-                log.warn("El campo fin no reflejó el valor esperado: {}", fechaFinInput.getAttribute("value"));
+            if (inputs.count() < 2) {
+                throw new RuntimeException("No se encontraron al menos 2 inputs de fecha");
+            }
+
+            List<Locator> visibles = new ArrayList<>();
+            int count = inputs.count();
+            for (int i = 0; i < count; i++) {
+                Locator in = inputs.nth(i);
+                if (in.isVisible()) visibles.add(in);
+            }
+
+            if (visibles.size() < 2) {
+                log.warn("No se encontraron 2 inputs visibles para rango de fechas");
+                return false;
+            }
+
+            Locator fechaInicioInput = visibles.get(0);
+            Locator fechaFinInput = visibles.get(1);
+
+            // 3) Set por JS + eventos
+            setInputValue(fechaInicioInput, fechaInicio);
+            setInputValue(fechaFinInput, fechaFin);
+
+            MetodsGeneric.randomWaitPage(page, 500, 800);
+
+            // 4) Verificación opcional
+            String valueIni = fechaInicioInput.inputValue();
+            if (!fechaInicio.equals(valueIni)) {
+                log.warn("El campo inicio no reflejó el valor esperado: {}", valueIni);
+            }
+
+            String valueFin = fechaFinInput.inputValue();
+            if (!fechaFin.equals(valueFin)) {
+                log.warn("El campo fin no reflejó el valor esperado: {}", valueFin);
             }
 
             return true;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.warn("Error configurando rango de fechas {} - {}: {}", fechaInicio, fechaFin, e.getMessage());
             return false;
         }
     }
 
-    public void applyFilters(WebDriver driver) {
+    public void applyFilters(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            int timeoutMs = 5_000;
 
             // 1) Localizar el botón “Buscar” dentro del filtro histórico.
-            WebElement buscarBtn = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("ibk-history-filter button[data-test='btnSearch']")
-            ));
+            Locator buscarBtn = MetodsGeneric.waitForAttached(
+                    page,
+                    "ibk-history-filter button[data-test='btnSearch']",
+                    timeoutMs
+            );
 
-            // 2) Asegurarnos de que el botón sea interactuable.
-            wait.until(ExpectedConditions.elementToBeClickable(buscarBtn));
-            scrollIntoView(driver, buscarBtn);
+            // 2) Llevar a vista y validar habilitado
+            buscarBtn.scrollIntoViewIfNeeded();
 
             if (isButtonDisabled(buscarBtn)) {
                 log.warn("El botón de búsqueda está deshabilitado, validando requisitos…");
-                driver.findElement(By.tagName("body")).click();
-                MetodsGeneric.randomWait(500, 800);
+                page.locator("body").first().click();
+                MetodsGeneric.randomWaitPage(page, 500, 800);
 
                 if (isButtonDisabled(buscarBtn)) {
-                    throw new IbkException("Botón de búsqueda permanece deshabilitado después de fijar el rango",
+                    throw new IbkException(
+                            "Botón de búsqueda permanece deshabilitado después de fijar el rango",
                             "IBK_SEARCH_DISABLED",
-                            "Verifica que las fechas y filtros cumplan los requisitos");
+                            "Verifica que las fechas y filtros cumplan los requisitos"
+                    );
                 }
             }
 
-            // 3) Click con fallback (algunos mat-button ignoran el click clásico si el overlay se monta encima).
-            try {
-                buscarBtn.click();
-            } catch (Exception e) {
-                new Actions(driver).moveToElement(buscarBtn).click().perform();
-            }
-
+            // 3) Click con fallback
+            MetodsGeneric.clickWithFallback(page, buscarBtn, timeoutMs);
             log.info("Búsqueda de movimientos ejecutada exitosamente");
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.warn("Error aplicando filtros de búsqueda: {}", e.getMessage());
-            throw new BcpException("No se pudo ejecutar la búsqueda");
+            throw new IbkException("No se pudo ejecutar la búsqueda");
         }
     }
 
-    public boolean waitForMovimientosToLoad(WebDriver driver) {
+    public boolean waitForMovimientosToLoad(Page page) {
         log.debug("Esperando a que cargue la grilla de movimientos…");
 
-        try {
-            MetodsGeneric.randomWait(1000,2000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        MetodsGeneric.randomWaitPage(page, 500, 1_000);
+        int timeoutMs = 5_000;
 
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-        By desktopRows = By.cssSelector("ibk-table[data-test='tblResult'] ibk-table-row.ng-star-inserted");
-        By emptyState = By.xpath("//*[contains(normalize-space(),'No se encontraron resultados') or contains(normalize-space(),'sin resultados')]");
-
-        ExpectedCondition<Boolean> criterioCarga = drv -> {
-            try {
-                if (!drv.findElements(desktopRows).isEmpty()) {
-                    log.debug("Tabla desktop detectada con {} filas",
-                            drv.findElements(desktopRows).size());
-                    return true;
-                }
-                if (!drv.findElements(emptyState).isEmpty()) {
-                    log.debug("Mensaje de resultados vacíos detectado");
-                    return true;
-                }
-                return false;
-            } catch (StaleElementReferenceException ignored) {
-                return false;
-            }
-        };
+        String desktopRowsSel = "ibk-table[data-test='tblResult'] ibk-table-row.ng-star-inserted";
+        String emptyStateXpath = "//*[contains(normalize-space(),'No se encontraron resultados') or contains(normalize-space(),'sin resultados')]";
 
         try {
-            wait.until(criterioCarga);
+            page.waitForFunction(
+                    "([rowsSel, emptyXp]) => {" +
+                            " const rows = document.querySelectorAll(rowsSel);" +
+                            " if (rows.length > 0) return true;" +
+                            " const empty = document.evaluate(emptyXp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);" +
+                            " return empty.snapshotLength > 0;" +
+                            "}",
+                    new Object[]{desktopRowsSel, emptyStateXpath},
+                    new Page.WaitForFunctionOptions().setTimeout(timeoutMs)
+            );
 
-            boolean hayRegistros = !driver.findElements(desktopRows).isEmpty();
-            boolean sinResultados = !driver.findElements(emptyState).isEmpty();
+            int rows = page.locator(desktopRowsSel).count();
+            int empty = page.locator("xpath=" + emptyStateXpath).count();
 
-            if (hayRegistros) {
+            if (rows > 0) {
                 log.debug("La tabla contiene movimientos");
                 return true;
             }
-            if (sinResultados) {
+            if (empty > 0) {
                 log.debug("Se mostró mensaje de sin resultados");
             } else {
                 log.debug("No se detectaron registros ni mensaje de vacío");
             }
             return false;
 
-        } catch (TimeoutException e) {
-            log.warn("Timeout esperando la grilla de movimientos: {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Timeout/error esperando la grilla de movimientos: {}", e.getMessage());
             return false;
         }
     }
 
-    public List<Map<String, Object>> extractMovimientosData(WebDriver driver) {
+    public List<Map<String, Object>> extractMovimientosData(Page page) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
 
         try {
-            if (!waitForMovimientosToLoad(driver)) {
+            if (!waitForMovimientosToLoad(page)) {
                 log.info("No se encontraron movimientos");
                 return movimientos;
             }
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("ibk-history-filter")
-            ));
+            MetodsGeneric.waitForAttached(page, "ibk-history-filter", 5_000);
 
-            movimientos.addAll(extractDesktopMovimientos(driver));
+            movimientos.addAll(extractDesktopMovimientos(page));
         } catch (Exception e) {
             log.warn("Error extrayendo datos de movimientos: {}", e.getMessage(), e);
         }
@@ -445,111 +372,117 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         return movimientos;
     }
 
-    public void openProfileDropdown(WebDriver driver) {
+    public void openProfileDropdown(Page page) {
         try {
+            int timeoutMs = 8_000;
             log.debug("Buscando trigger del menú de usuario (desktop)…");
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+            Locator trigger = MetodsGeneric.waitForVisible(
+                    page,
+                    "ibk-user .mat-mdc-menu-trigger.action-menu",
+                    timeoutMs
+            );
 
-            WebElement trigger = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.cssSelector("ibk-user .mat-mdc-menu-trigger.action-menu")
-            ));
-
-            if (!"true".equalsIgnoreCase(trigger.getAttribute("aria-expanded"))) {
-                clickWithFallback(driver, trigger);
+            String expanded = trigger.getAttribute("aria-expanded");
+            if (!"true".equalsIgnoreCase(expanded)) {
+                MetodsGeneric.clickWithFallback(page, trigger, timeoutMs);
             }
 
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("div.cdk-overlay-pane .user-menu[data-test='lstPrimary']")
-            ));
+            MetodsGeneric.waitForVisible(
+                    page,
+                    "div.cdk-overlay-pane .user-menu[data-test='lstPrimary']",
+                    timeoutMs
+            );
 
             log.debug("Menú de usuario desplegado correctamente");
-        } catch (TimeoutException e) {
+        } catch (Exception e) {
             log.error("No se pudo abrir el menú de usuario: {}", e.getMessage());
-            throw new BcpException("No se pudo abrir el menú del usuario",
+            throw new IbkException("No se pudo abrir el menú del usuario",
                     "IBK_MENU_OPEN_ERROR",
                     "Revisa si la cabecera cargó correctamente");
         }
     }
 
-    public void clickLogoutButton(WebDriver driver) {
+    public void clickLogoutButton(Page page) {
         try {
             log.debug("Buscando opción 'Cerrar sesión' en el menú…");
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+            int timeoutMs = 8_000;
 
-            WebElement logoutOption = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//div[contains(@class,'mat-mdc-menu-panel')]//a[contains(@class,'user-menu__link')][normalize-space()='Cerrar sesión']")
-            ));
+            Locator logoutOption = MetodsGeneric.waitForVisible(
+                    page,
+                    "//div[contains(@class,'mat-mdc-menu-panel')]//a[contains(@class,'user-menu__link')][normalize-space()='Cerrar sesión']",
+                    timeoutMs
+            );
 
-            clickWithFallback(driver, logoutOption);
+            MetodsGeneric.clickWithFallback(page, logoutOption, timeoutMs);
 
-            try {
-                MetodsGeneric.randomWait(1000,2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            MetodsGeneric.randomWaitPage(page, 1_000, 2_000);
 
-        } catch (TimeoutException e) {
+        } catch (Exception e) {
             log.error("No se pudo completar el logout: {}", e.getMessage());
-            throw new BcpException("No se encontró el botón de cerrar sesión",
+            throw new IbkException("No se encontró el botón de cerrar sesión",
                     "IBK_LOGOUT_CLICK_ERROR",
                     "Verifica que el menú esté desplegado y que el diálogo de confirmación aparezca");
         }
     }
 
-    public void handleNpsSurvey(WebDriver driver) {
+    public void handleNpsSurvey(Page page) {
         try {
             log.debug("Opción 'Cerrar sesión' clickeada, esperando diálogo de confirmación…");
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
+            int timeoutMs = 8_000;
 
-            WebElement dialog = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("mat-dialog-container.mat-mdc-dialog-container")
-            ));
+            Locator dialog = MetodsGeneric.waitForVisible(
+                    page,
+                    "mat-dialog-container.mat-mdc-dialog-container",
+                    timeoutMs
+            );
 
-            WebElement continuarBtn = wait.until(ExpectedConditions.elementToBeClickable(
-                    By.cssSelector("button[data-test='btnContinuarAlert']")
-            ));
+            Locator continuarBtn = MetodsGeneric.waitForVisible(
+                    page,
+                    "button[data-test='btnContinuarAlert']",
+                    timeoutMs
+            );
 
-            clickWithFallback(driver, continuarBtn);
+            MetodsGeneric.clickWithFallback(page, continuarBtn, timeoutMs);
+            MetodsGeneric.randomWaitPage(page, 2_000, 3_000);
 
-            try {
-                MetodsGeneric.randomWait(2000,3000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-
-            wait.until(ExpectedConditions.invisibilityOf(dialog));
+            dialog.waitFor(new Locator.WaitForOptions()
+                    .setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN)
+                    .setTimeout(timeoutMs));
 
             log.debug("Confirmación de logout aceptada");
 
-        } catch (TimeoutException e) {
+        } catch (Exception e) {
             log.error("No se pudo completar el logout, no hay dialogo: {}", e.getMessage());
-            throw new BcpException("No se encontró modal de cerrar sesión",
+            throw new IbkException("No se encontró modal de cerrar sesión",
                     "IBK_LOGOUT_CLICK_ERROR",
                     "Verifica que el diálogo de confirmación aparezca");
         }
     }
 
-    public boolean verifyLogoutSuccess(WebDriver driver) {
+    public boolean verifyLogoutSuccess(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+            int timeoutMs = 15_000;
 
-            wait.until(ExpectedConditions.or(
-                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector("ibk-auth-main")),
-                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector("button[data-test='btnEnter']")),
-                    ExpectedConditions.urlContains("/login")
-            ));
+            page.waitForFunction(
+                    "() => {" +
+                            "const authMain = document.querySelector('ibk-auth-main');" +
+                            "const btnEnter = document.querySelector(\"button[data-test='btnEnter']\");" +
+                            "const href = window.location.href || '';" +
+                            "const visible = (el) => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);" +
+                            "return visible(authMain) || visible(btnEnter) || href.includes('/login') || href.includes('/ciam') || href.includes('/auth');" +
+                            "}",
+                    new Page.WaitForFunctionOptions().setTimeout(timeoutMs)
+            );
 
-            boolean loginVisible = driver.findElements(By.cssSelector("button[data-test='btnEnter']")).stream()
-                    .anyMatch(WebElement::isDisplayed);
-
-            if (loginVisible) {
+            Locator loginBtn = page.locator("button[data-test='btnEnter']").first();
+            if (loginBtn.count() > 0 && loginBtn.isVisible()) {
                 log.debug("Logout verificado: botón 'Iniciar sesión' visible");
                 return true;
             }
 
-            String url = driver.getCurrentUrl();
+            String url = page.url();
             if (url != null && (url.contains("/login") || url.contains("/ciam") || url.contains("/auth"))) {
                 log.debug("Logout inferido por URL de login: {}", url);
                 return true;
@@ -557,69 +490,9 @@ public class IbkMenuServiceImpl implements IbkMenuService {
 
             log.warn("No se pudo confirmar el logout de forma explícita");
             return false;
-
-        } catch (TimeoutException e) {
+        } catch (Exception e) {
             log.warn("Timeout esperando la pantalla de login tras logout: {}", e.getMessage());
             return false;
-        }
-    }
-
-    /**
-     * Espera y verifica si el login fue satisfactorio
-     *
-     * @param driver manejador de página
-     * @return {@link boolean}
-     * @throws InterruptedException si hubo interrupcion
-     */
-    private boolean waitAndVerifyLoginSuccess(WebDriver driver) throws InterruptedException {
-        waitForPageStabilization();
-
-        boolean menuVisible = isSideMenuVisible(driver);
-
-        log.debug("Indicadores login - Menu: {}", menuVisible);
-
-        return menuVisible;
-    }
-
-    /**
-     * Espera para que la página se estabilice después del login
-     *
-     * @throws InterruptedException si hubo interrupcion
-     */
-    private void waitForPageStabilization() throws InterruptedException {
-        log.debug("Esperando estabilización de la página post-login...");
-        Thread.sleep(3000);
-    }
-
-    /**
-     * Verifica si el menú lateral está visible como indicador de login exitoso
-     *
-     * @param driver manejador de página
-     * @return {@link boolean}
-     */
-    private boolean isSideMenuVisible(WebDriver driver) {
-        try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            WebElement sideMenu = wait.until(
-                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector("ibk-menu-sidebar-desktop"))
-            );
-
-            boolean isMenuVisible = sideMenu.isDisplayed();
-            log.info("Menú lateral encontrado y visible: {}", isMenuVisible);
-
-            return isMenuVisible;
-
-        } catch (Exception e) {
-            log.warn("No se pudo encontrar/verificar el menú lateral: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    private void clickWithFallback(WebDriver driver, WebElement element) {
-        try {
-            element.click();
-        } catch (Exception clickFailed) {
-            new Actions(driver).moveToElement(element).click().perform();
         }
     }
 
@@ -628,13 +501,14 @@ public class IbkMenuServiceImpl implements IbkMenuService {
      * @param row fila
      * @return {@link Map} datos de una cuenta por fila
      */
-    private Map<String, Object> extractAccountFromRow(WebElement row) {
+    private Map<String, Object> extractAccountFromRow(Locator row) {
         Map<String, Object> account = new HashMap<>();
 
         try {
             // 1. Número de cuenta (3ª columna)
-            WebElement accountCell = row.findElement(By.cssSelector("ibk-table-cell:nth-of-type(3)"));
-            String rawAccountText = accountCell.getText().trim();
+            Locator accountCell = row.locator("ibk-table-cell:nth-of-type(3)").first();
+            String rawAccountText = Optional.ofNullable(accountCell.textContent()).orElse("").trim();
+
             String numeroCuenta = extractAccountNumber(rawAccountText);
             numeroCuenta = MetodsGeneric.cleanAccountNumber(numeroCuenta);
             if (numeroCuenta.isEmpty()) {
@@ -644,37 +518,38 @@ public class IbkMenuServiceImpl implements IbkMenuService {
             account.put(Constantes.KEY_NUMERO_CUENTA, numeroCuenta);
 
             // 2. Moneda (2ª columna) -> símbolo S/ o $
-            WebElement currencyCell = row.findElement(By.cssSelector("ibk-table-cell:nth-of-type(2)"));
-            String currencyText = currencyCell.getText().replaceAll("\\s+", "");
-            account.put(Constantes.KEY_MONEDA, currencyText.equals("S/") ? "PEN" : "USD");
+            Locator currencyCell = row.locator("ibk-table-cell:nth-of-type(2)").first();
+            String currencyText = Optional.ofNullable(currencyCell.textContent()).orElse("").replaceAll("\\s+", "");
+            account.put(Constantes.KEY_MONEDA, "S/".equals(currencyText) ? "PEN" : "USD");
 
             // 3. Saldo contable (5ª columna)
-            WebElement amountContableElement = row.findElement(By.cssSelector(
+            Locator amountContableElement = row.locator(
                     "ibk-table-cell:nth-of-type(5) span[data-test='lblAmount']"
-            ));
-            String amountContableText = amountContableElement.getText().trim();
+            ).first();
+            String amountContableText = Optional.ofNullable(amountContableElement.textContent()).orElse("").trim();
             double saldoContable = MetodsGeneric.parseSaldo(amountContableText);
             account.put(Constantes.KEY_SALDO_CONT, saldoContable);
 
             // 4. Saldo disponible (6ª columna)
-            WebElement amountDisponibleElement = row.findElement(By.cssSelector(
+            Locator amountDisponibleElement = row.locator(
                     "ibk-table-cell:nth-of-type(6) span[data-test='lblAmount']"
-            ));
-            String amountDisponibleText = amountDisponibleElement.getText().trim();
+            ).first();
+            String amountDisponibleText = Optional.ofNullable(amountDisponibleElement.textContent()).orElse("").trim();
             double saldoDisponible = MetodsGeneric.parseSaldo(amountDisponibleText);
             account.put(Constantes.KEY_SALDO_DISP, saldoDisponible);
 
             return account;
-
-        } catch (NoSuchElementException e) {
-            log.warn("Elementos esperados no encontrados en fila: {}", e.getMessage());
-            return Collections.emptyMap();
         } catch (Exception e) {
             log.error("Error extrayendo datos de fila: {}", e.getMessage());
             return Collections.emptyMap();
         }
     }
 
+    /**
+     * Extrae valor numerico del texto de la pagina
+     * @param cellText Texto con monto
+     * @return {@link String}
+     */
     private String extractAccountNumber(String cellText) {
         // Preferimos el formato 200-3002628315; si no, devolvemos el texto completo.
         Pattern pattern = Pattern.compile("\\b\\d{3}-\\d{9,}\\b");
@@ -682,6 +557,11 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         return matcher.find() ? matcher.group() : cellText;
     }
 
+    /**
+     * Formatea cuenta para seleccion en dropdown
+     * @param numeroCuenta numero de cuenta
+     * @return {@link String}
+     */
     private String formatAccountForDropdown(String numeroCuenta) {
         String clean = numeroCuenta.replaceAll("\\D+", ""); // quita cualquier separador si viene mezclado
         if (clean.length() > 3) {
@@ -690,63 +570,50 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         return clean;
     }
 
-    private boolean isButtonDisabled(WebElement button) {
-        return !button.isEnabled()
-                || Boolean.parseBoolean(button.getAttribute("disabled"))
-                || button.getAttribute("class").toLowerCase().contains("mdc-button--disabled");
-    }
-
-    private void scrollIntoView(WebDriver driver, WebElement element) {
-        ((JavascriptExecutor) driver).executeScript(
-                "arguments[0].scrollIntoView({block:'center', inline:'center'});", element
-        );
-    }
-
-    private void setInputValue(JavascriptExecutor js, WebElement input, String value) {
-        js.executeScript("arguments[0].value = arguments[1];", input, value);
-        js.executeScript("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", input);
-        js.executeScript("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", input);
-        js.executeScript("arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));", input);
-    }
-
-    private List<Map<String, Object>> extractDesktopMovimientos(WebDriver driver) {
+    /**
+     * Extrae los movimientos de la pagina
+     * @param page manejador de pagina
+     * @return {@link List}
+     */
+    private List<Map<String, Object>> extractDesktopMovimientos(Page page) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
 
-        List<WebElement> filas = driver.findElements(
-                By.cssSelector("ibk-table[data-test='tblResult'] ibk-table-body ibk-table-row.ng-star-inserted")
-        );
+        Locator filas = page.locator("ibk-table[data-test='tblResult'] ibk-table-body ibk-table-row.ng-star-inserted");
+        int totalFilas = filas.count();
 
-        if (filas.isEmpty()) {
+        if (totalFilas == 0) {
             log.debug("Tabla de movimientos desktop sin filas visibles");
             return movimientos;
         }
 
-        for (WebElement fila : filas) {
+        for (int i = 0; i < totalFilas; i++) {
             try {
-                List<WebElement> columnas = fila.findElements(By.cssSelector("ibk-table-cell"));
+                Locator fila = filas.nth(i);
+                Locator columnas = fila.locator("ibk-table-cell");
+                int nCols = columnas.count();
 
-                if (columnas.size() < 8) {
-                    log.warn("Fila con columnas insuficientes: {}", columnas.size());
+                if (nCols < 8) {
+                    log.warn("Fila con columnas insuficientes: {}", nCols);
                     continue;
                 }
 
                 Map<String, Object> movimiento = new HashMap<>();
-                movimiento.put("fecha", normalizeText(columnas.get(0)));
-                movimiento.put("fecha_valor", normalizeText(columnas.get(1)));
-                movimiento.put("operacion", normalizeText(columnas.get(2)));
+                movimiento.put("fecha", normalizeText(columnas.nth(0)));
+                movimiento.put("fecha_valor", normalizeText(columnas.nth(1)));
+                movimiento.put("operacion", normalizeText(columnas.nth(2)));
 
-                String movimientoLabel = normalizeText(columnas.get(3));
-                String descripcionLabel = normalizeText(columnas.get(4));
+                String movimientoLabel = normalizeText(columnas.nth(3));
+                String descripcionLabel = normalizeText(columnas.nth(4));
                 String descripcion = buildDescripcion(movimientoLabel, descripcionLabel);
                 movimiento.put("descripcion", descripcion);
 
                 movimiento.put("referencia", "-");
 
-                double monto = parseAmountColumn(columnas.get(6));
+                double monto = parseAmountColumn(columnas.nth(6));
                 movimiento.put("monto", monto);
                 movimiento.put("tipo", monto < 0 ? "DEBITO" : "CREDITO");
 
-                double saldo = parseAmountColumn(columnas.get(7));
+                double saldo = parseAmountColumn(columnas.nth(7));
                 movimiento.put("saldo", saldo);
 
                 movimientos.add(movimiento);
@@ -760,14 +627,23 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         return movimientos;
     }
 
-    private String normalizeText(WebElement cell) {
-        String text = cell.getText();
-        if (text == null) {
-            return "";
-        }
+    /**
+     * Normaliza un texto
+     * @param cell elemento de pagina
+     * @return {@link String}
+     */
+    private String normalizeText(Locator cell) {
+        String text = cell.textContent();
+        if (text == null) return "";
         return text.replaceAll("\\s+", " ").trim();
     }
 
+    /**
+     * Formatea descripcion del movimiento
+     * @param movimiento descripcion del movimiento
+     * @param detalle detalle del movimiento
+     * @return {@link String}
+     */
     private String buildDescripcion(String movimiento, String detalle) {
         if (movimiento.isEmpty()) {
             return detalle;
@@ -778,33 +654,45 @@ public class IbkMenuServiceImpl implements IbkMenuService {
         return movimiento + " - " + detalle;
     }
 
-    private double parseAmountColumn(WebElement cell) {
+    /**
+     * Extrae el dato de monto de la columna del elemento de la pagina
+     * @param cell elemento de pagina
+     * @return {@link double}
+     */
+    private double parseAmountColumn(Locator cell) {
         try {
-            WebElement amountSpan = cell.findElement(By.cssSelector("span.label-balance__amount"));
-            String amountText = amountSpan.getText().trim();
-            return MetodsGeneric.parseSaldo(amountText);
-        } catch (NoSuchElementException ignored) {
-            return MetodsGeneric.parseSaldo(cell.getText().trim());
+            Locator amountSpan = cell.locator("span.label-balance__amount").first();
+            if (amountSpan.count() > 0) {
+                String amountText = amountSpan.textContent() == null ? "" : amountSpan.textContent().trim();
+                return MetodsGeneric.parseSaldo(amountText);
+            }
+        } catch (Exception e) {
+            log.error("Error parsing amount column: {}", e.getMessage());
         }
-    }
-
-    private String textOrEmpty(WebElement context, String css) {
-        return context.findElements(By.cssSelector(css)).stream()
-                .findFirst()
-                .map(el -> el.getText().replaceAll("\\s+", " ").trim())
-                .orElse("");
+        String raw = cell.textContent() == null ? "" : cell.textContent().trim();
+        return MetodsGeneric.parseSaldo(raw);
     }
 
     /**
-     * Maneja excepciones de interrupción de manera consistente
-     *
-     * @param e error de interrupcion
+     * Detecta si el boton esta activado o desactivado
+     * @param button Elemento de la pagina a evaluar
+     * @return {@link boolean}
      */
-    private void handleInterruptedException(InterruptedException e) throws BcpException {
-        log.error("Interrupción durante la navegación: {}", e.getMessage());
-        Thread.currentThread().interrupt();
-        throw new BcpException("Interrupción durante la navegación",
-                "IBK_NAVIGATION_INTERRUPTED",
-                "El proceso fue interrumpido durante la navegación");
+    private boolean isButtonDisabled(Locator button) {
+        String disabledAttr = button.getAttribute("disabled");
+        String ariaDisabled = button.getAttribute("aria-disabled");
+        return disabledAttr != null || "true".equalsIgnoreCase(ariaDisabled);
+    }
+
+    /**
+     * Inserta la fecha en los campos de busqueda
+     * @param input elemento de la pagina donde se ingresara el valor
+     * @param value valor
+     */
+    private void setInputValue(Locator input, String value) {
+        input.evaluate(
+                "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); el.dispatchEvent(new Event('blur', { bubbles: true })); }",
+                value
+        );
     }
 }

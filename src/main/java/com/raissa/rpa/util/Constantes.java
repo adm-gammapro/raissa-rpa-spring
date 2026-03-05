@@ -58,6 +58,9 @@ public class Constantes {
 
     public static final String KEY_DATA = "data";
     public static final String KEY_COUNT = "count";
+    public static final String KEY_CUENTA = "cuenta";
+    public static final String KEY_FECHA_INICIO = "fechaInicio";
+    public static final String KEY_FECHA_FIN = "fechaFin";
 
     public static final String PROVIDER_ALFIN = "alfin_api";
     public static final String GRUPO_LOGIN = "login";

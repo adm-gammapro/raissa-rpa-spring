@@ -1,7 +1,7 @@
 package com.raissa.rpa.service.commons;
 
-import org.openqa.selenium.WebDriver;
+import com.raissa.rpa.config.NavigatorSession;
 
 public interface NavigatorService {
-    WebDriver iniciarNavegador();
+    NavigatorSession iniciarNavegador(String transactionId);
 }

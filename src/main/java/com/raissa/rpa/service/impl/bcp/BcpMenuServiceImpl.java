@@ -1,43 +1,34 @@
 package com.raissa.rpa.service.impl.bcp;
 
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.WaitForSelectorState;
 import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.service.bcp.BcpMenuService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.ElementClickInterceptedException;
-import org.openqa.selenium.ElementNotInteractableException;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.StaleElementReferenceException;
-import org.openqa.selenium.TimeoutException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.interactions.Actions;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
 @Service
 @Slf4j
 public class BcpMenuServiceImpl implements BcpMenuService {
-    public boolean verifyLoginSuccess(WebDriver driver) {
+    public boolean verifyLoginSuccess(Page page) {
         log.info("Verificando si el login fue exitoso...");
 
         try {
-            if (checkForLoginErrors(driver)) {
+            if (checkForLoginErrors(page)) {
                 return false;
             }
 
-            return waitAndVerifyLoginSuccess(driver);
+            return waitAndVerifyLoginSuccess(page);
 
         } catch (InterruptedException e) {
             handleInterruptedException(e);
@@ -48,473 +39,349 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         }
     }
 
-    public void handleMobileModal(WebDriver driver) {
+    public void handleMobileModal(Page page) {
         try {
-            MetodsGeneric.randomWait(5000, 7000);
+            Locator modal = MetodsGeneric.waitForVisible(page, "bcp-mobile-modal .bcp-modal-host-4-25-0.show", 5_000);
 
-            List<WebElement> modals = driver.findElements(By.cssSelector("bcp-mobile-modal .bcp-modal-host-4-25-0.show"));
+            log.info("Modal móvil detectado, intentando cerrar...");
+            Locator closeIcon = MetodsGeneric.waitForVisible(page, "bcp-mobile-modal bcp-icon[name='close-r']", 2_000);
+            Locator closeButton = closeIcon.locator("xpath=./ancestor::button");
 
-            if (!modals.isEmpty() && modals.get(0).isDisplayed()) {
-                try {
-                    WebElement closeIcon = driver.findElement(By.cssSelector("bcp-mobile-modal bcp-icon[name='close-r']"));
-                    WebElement closeButton = closeIcon.findElement(By.xpath("./ancestor::button"));
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", closeButton);
-                    log.info("Modal cerrado a través del ícono");
-                } catch (NoSuchElementException e2) {
-                    log.error("No se pudo encontrar el botón de cerrar");
-                }
+            closeButton.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(3_000));
 
-            } else {
-                log.info("No se detectó modal móvil abierto");
-            }
-        } catch (NoSuchElementException e) {
-            log.info("No se encontró el modal móvil: {}", e.getMessage());
-        } catch (TimeoutException e) {
+            MetodsGeneric.clickWithFallback(page, closeButton, 3_000);
+
+            modal.first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.HIDDEN)
+                    .setTimeout(3_000));
+
+            log.info("Modal móvil cerrado exitosamente");
+        } catch (TimeoutError e) {
             log.warn("Timeout esperando a que el modal se cierre: {}", e.getMessage());
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
         } catch (Exception e) {
             log.warn("Error manejando el modal móvil: {}", e.getMessage());
         }
     }
 
-    public void clickAccountsTab(WebDriver driver) {
-        try {
-            log.debug("Buscando tab 'Cuentas'...");
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            if(seleccionarTabCuentasXpath(wait)) {
-                return;
-            }
-
-            throw new NoSuchElementException("No se pudo encontrar el tab de Cuentas");
-
-        } catch (Exception e) {
-            log.error("Error haciendo click en tab Cuentas: {}", e.getMessage());
-            throw new BcpException("No se pudo acceder a la sección de cuentas",
-                    "BCP_ACCOUNTS_TAB_ERROR",
-                    "No se pudo encontrar el tab de Cuentas");
-        }
-    }
-
-    public boolean isOnAccountsPage(WebDriver driver) {
+    public boolean isOnAccountsPage(Page page) {
         try {
             String[] accountsIndicators = {
                     "[class*='account']",
                     "[data-role*='account']",
                     "#accounts",
                     ".account-balance",
-                    "bcp-account", // Componente de cuenta
-                    "table:contains('Cuenta')" // Tabla con información de cuentas
+                    "bcp-account",
+                    "table:has-text(\"Cuenta\")"
             };
 
             for (String selector : accountsIndicators) {
-                return verificarPaginaCuentas(driver, selector);
+                if (buscaElemento(page, selector)) {
+                    log.debug("Ya en página de cuentas - indicador: {}", selector);
+                    return true;
+                }
             }
-
             return false;
-
         } catch (Exception e) {
             log.debug("Error verificando página de cuentas: {}", e.getMessage());
             return false;
         }
     }
 
-    public void waitForAccountsToLoad(WebDriver driver) {
+    public void waitForAccountsToLoad(Page page) {
         try {
             log.debug("Esperando a que carguen los datos de cuentas...");
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//bcp-title-9nbaaa//h1[normalize-space()='Cuentas']")
-            ));
-
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
+            MetodsGeneric.waitForVisible(page, "bcp-title-9nbaaa >> h1:has-text(\"Cuentas\")", 5_000);
+        } catch (TimeoutError e) {
+            log.debug("Botón 'Cuentas' por texto no visible: {}", e.getMessage());
         } catch (Exception e) {
             log.warn("Error esperando carga de cuentas: {}", e.getMessage());
         }
     }
 
-    public void waitForResumenAccountsToLoad(WebDriver driver) {
+    public void waitForResumenAccountsToLoad(Page page) {
         try {
             log.debug("Esperando a que carguen los datos de resumen de cuentas...");
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//bcp-title-9nbaaa//h1[normalize-space()='Resumen de cuentas']")
-            ));
-            Thread.sleep(500);
+            page.waitForSelector(
+                    "bcp-title-9nbaaa h1:has-text(\"Resumen de cuentas\")",
+                    new Page.WaitForSelectorOptions()
+                            .setState(WaitForSelectorState.VISIBLE)
+                            .setTimeout(3_000)
+            );
 
-            WebElement cuentasOption = driver.findElement(By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']"));
-            cuentasOption.click();
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
+            MetodsGeneric.randomWaitPage(page, 500, 800);
+        } catch (TimeoutError e) {
+            log.warn("Timeout, esperando a que carguen los datos de resumen de cuentas: {}", e.getMessage());
         } catch (Exception e) {
             log.warn("Error esperando carga de resumen de cuentas: {}", e.getMessage());
         }
     }
 
-    public List<Map<String, Object>> extractAccountsData(WebDriver driver) {
+    public List<Map<String, Object>> extractAccountsData(Page page) {
         List<Map<String, Object>> accounts = new ArrayList<>();
 
         try {
             log.debug("Extrayendo datos reales de cuentas...");
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+            Locator dataTable = MetodsGeneric.waitForVisible(page, "bcp-data-table-9nbaaa", 15_000);
 
-            WebElement dataTable = wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.cssSelector("bcp-data-table-9nbaaa")
-            ));
+            Locator accountRows = dataTable.locator("xpath=.//bcp-table-row-9nbaaa[@index and string-length(@index) > 0]");
+            long rowCount = accountRows.count();
+            log.debug("Encontradas {} filas de cuentas", rowCount);
 
-            List<WebElement> accountRows = dataTable.findElements(By.xpath(
-                    ".//bcp-table-row-9nbaaa[@index and string-length(@index) > 0]"
-            ));
-
-            log.debug("Encontradas {} filas de cuentas", accountRows.size());
-
-            for (WebElement row : accountRows) {
+            for (int i = 0; i < rowCount; i++) {
+                Locator row = accountRows.nth(i);
                 Map<String, Object> accountData = extractAccountFromRow(row);
                 if (!accountData.isEmpty()) {
                     accounts.add(accountData);
                     log.debug("Cuenta extraída: {}", accountData.get(Constantes.KEY_NUMERO_CUENTA));
                 }
             }
-
             return accounts;
-
         } catch (Exception e) {
             log.error("Error extrayendo datos de cuentas: {}", e.getMessage());
             return accounts;
         }
     }
 
-    public boolean navigateToResumen(WebDriver driver) {
+    public void navigateToResumen(Page page) {
         try {
-            By cuentasBy = By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']");
-            By resumenBy = By.xpath("//div[contains(@class,'ms-child')]//p[normalize-space()='Resumen de Cuentas']");
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(6));
-
-            WebElement resumenOption;
-            try {
-                resumenOption = wait.until(ExpectedConditions.elementToBeClickable(resumenBy));
-            } catch (TimeoutException e) {
-                WebElement cuentasOption = wait.until(ExpectedConditions.elementToBeClickable(cuentasBy));
-                cuentasOption.click();
-                resumenOption = wait.until(ExpectedConditions.elementToBeClickable(resumenBy));
+            Locator resumenSel = MetodsGeneric.waitForVisible(
+                    page,
+                    "xpath=//div[contains(@class,'ms-child')]//p[normalize-space()='Resumen de Cuentas']",
+                    2_000);
+            if (!MetodsGeneric.clickWithFallback(page, resumenSel, 2_000)) {
+                Locator cuentasSel = MetodsGeneric.waitForVisible(
+                        page,
+                        "xpath=//bcp-menu-sidebar//p[normalize-space()='Cuentas']",
+                        2_000);
+                if (MetodsGeneric.clickWithFallback(page, cuentasSel, 2_000)) {
+                    MetodsGeneric.clickWithFallback(page, resumenSel, 2_000);
+                }
             }
 
-            resumenOption.click();
-            return true;
+            log.warn("No se encontró la opción 'Resumen de Cuentas'");
+        } catch (TimeoutError e) {
+            log.warn("Timeout, esperando a que carguen los datos del resumen: {}", e.getMessage());
+            throw new BcpException("Se supero tiempo de espera al navegar a resumen",
+                    "BCP_NAVIGATION_ERROR",
+                    "No se pudo acceder a la sección de resumen");
         } catch (Exception e) {
             log.warn("Error navegando a resumen: {}", e.getMessage());
-            return false;
+            throw new BcpException("No se pudo navegar a resumen",
+                    "BCP_NAVIGATION_ERROR",
+                    "No se pudo acceder a la sección de resumen");
         }
     }
 
-    public boolean selectCuenta(WebDriver driver, String numeroCuenta) {
+    public boolean selectCuenta(Page page, String numeroCuenta) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(8));
-
-            if (!seleccionarTabCuentasXpath(wait)) {
-                log.warn("No se pudo abrir la pestaña de cuentas");
-                return false;
-            }
+            clickAccountsTab(page);
 
             String objetivo = numeroCuenta.replaceAll("\\D", "");
 
-            List<WebElement> filas = wait.until(
-                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
-                            By.cssSelector("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]")
-                    )
-            );
+            Locator filas = page.locator("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]");
 
-            for (WebElement fila : filas) {
+            long total = filas.count();
+            for (int i = 0; i < total; i++) {
+                Locator filaCuenta = filas.nth(i);
+                Locator celdaCuenta = filaCuenta.locator("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text");
+                if (celdaCuenta.count() == 0) continue;
 
-                WebElement celdaCuenta = fila.findElement(
-                        By.cssSelector("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text")
-                );
-
-                String cuentaTabla = celdaCuenta.getText().replaceAll("\\D", "");
-                if (!objetivo.equals(cuentaTabla)) {
-                    continue;
-                }
+                String cuentaTabla = celdaCuenta.first().innerText().replaceAll("\\D", "");
+                if (!objetivo.equals(cuentaTabla)) continue;
 
                 log.debug("Cuenta {} encontrada, preparando click en detalle", numeroCuenta);
 
-                new Actions(driver).moveToElement(fila).pause(Duration.ofMillis(200)).perform();
+                filaCuenta.hover(new Locator.HoverOptions().setTimeout(2_000));
+                page.waitForTimeout(200);
 
-                WebElement iconoDetalle = fila.findElement(
-                        By.cssSelector(".options-container bcp-icon-9nbaaa[name='eye-b']")
-                );
+                Locator iconoDetalle = filaCuenta.locator(".options-container bcp-icon-9nbaaa[name='eye-b']");
+                if (iconoDetalle.count() == 0) {
+                    log.warn("No se encontró el ícono de detalle en la fila de la cuenta {}", numeroCuenta);
+                    return false;
+                }
 
-                wait.until(ExpectedConditions.elementToBeClickable(iconoDetalle));
-                clickWithFallback(driver, iconoDetalle);
-
-                esperarPantallaDetalle(wait);
+                MetodsGeneric.clickWithFallback(page, iconoDetalle, 5_000);
+                esperarPantallaDetalle(page);
                 return true;
             }
 
-            log.warn("No se encontró la cuenta {}", numeroCuenta);
+            log.warn("No se encontró cuenta para extraccion de movimientos {}", numeroCuenta);
             return false;
-
+        } catch (TimeoutError te) {
+            log.warn("Se supero tiempo de espera seleccionando cuenta {}: {}", numeroCuenta, te.getMessage());
+            return false;
         } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-                throw new BcpException("Interrupción durante la navegación",
-                        "BCP_NAVIGATION_INTERRUPTED",
-                        "El proceso fue interrumpido durante la navegación");
-            }
-            log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
-            return false;
+            log.warn("Error seleccionando cuenta para estraccion de movimientos {}: {}", numeroCuenta, e.getMessage());
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "El proceso fue interrumpido durante la navegación");
         }
     }
 
-    public boolean setDateRange(WebDriver driver, String fechaInicio, String fechaFin) {
+    public void setDateRange(Page page, String fechaInicio, String fechaFin) {
         log.info("Iniciando carga de rango de fechas");
         try {
-            MetodsGeneric.randomWait(2000, 3000);
+            Locator fechaInicioInput = MetodsGeneric.waitForVisible(page, "bcp-input-bpbaaa input[name='inputDateFrom']", 5_000);
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            Locator fechaFinInput = page.locator("bcp-input-bpbaaa input[name='inputDateTo']").first();
 
-            wait.until(ExpectedConditions.visibilityOfElementLocated(
-                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateFrom']")
-            ));
+            fechaInicioInput.evaluate("(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }", fechaInicio);
+            fechaFinInput.evaluate("(el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }", fechaFin);
 
-            WebElement fechaInicioInput = driver.findElement(
-                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateFrom']")
-            );
-
-            WebElement fechaFinInput = driver.findElement(
-                    By.xpath("//bcp-input-bpbaaa//input[@name='inputDateTo']")
-            );
-
-            // Establecer valores directamente con JavaScript
-            ((JavascriptExecutor) driver).executeScript("arguments[0].value = arguments[1];", fechaInicioInput, fechaInicio);
-            ((JavascriptExecutor) driver).executeScript("arguments[0].value = arguments[1];", fechaFinInput, fechaFin);
-
-            // Disparar eventos para que se registren los cambios
-            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", fechaInicioInput);
-            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", fechaInicioInput);
-            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", fechaFinInput);
-            ((JavascriptExecutor) driver).executeScript("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", fechaFinInput);
-
-            MetodsGeneric.randomWait(500, 800);
-
-            return true;
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            MetodsGeneric.randomWaitPage(page, 500, 800);
+        } catch (TimeoutError te) {
+            log.warn("Timeout configurando rango de fechas {} - {}: {}", fechaInicio, fechaFin, te.getMessage());
             throw new BcpException("Interrupción durante la navegación",
                     "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
+                    "Timeout configurando rango de fechas");
         } catch (Exception e) {
             log.warn("Error configurando rango de fechas {} - {}: {}", fechaInicio, fechaFin, e.getMessage());
-            return false;
+            throw new BcpException("Interrupción durante la navegación",
+                    "BCP_NAVIGATION_INTERRUPTED",
+                    "Error configurando rango de fechas");
         }
     }
 
-    public void applyFilters(WebDriver driver) {
+    public void applyFilters(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            Locator buscarBtn = MetodsGeneric.waitForVisible(page, "bcp-button-bpbaaa[id-auto='clean-fiters-account-detail'] >> button", 10_000);
 
-            wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//bcp-button-bpbaaa[@id-auto='clean-fiters-account-detail']//button")
-            ));
-
-            WebElement buscarBtn = driver.findElement(
-                    By.xpath("//bcp-button-bpbaaa[@id-auto='clean-fiters-account-detail']//button")
-            );
-
-            if (!buscarBtn.isEnabled()) {
-                log.warn("El botón de búsqueda está deshabilitado, verificando validaciones...");
-
-                driver.findElement(By.tagName("body")).click();
-                Thread.sleep(1000);
-
-                if (!buscarBtn.isEnabled()) {
-                    throw new BcpException("Botón de búsqueda permanece deshabilitado después de ingresar fechas");
-                }
-            }
-
-            buscarBtn.click();
-
+            MetodsGeneric.clickWithFallback(page, buscarBtn, 5_000);
             log.info("Búsqueda de movimientos ejecutada exitosamente");
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.warn("Error aplicando filtros de búsqueda: {}", e.getMessage());
             throw new BcpException("No se pudo ejecutar la búsqueda");
         }
     }
 
-    public void waitForMovimientosToLoad(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-data-table-bpbaaa[contains(@class, 'bcp-data-table-host')]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-table-row-bpbaaa[@index]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-character-bpbaaa[contains(., 'FECHA')]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-character-bpbaaa[contains(., 'DESCRIPCIÓN')]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//bcp-character-bpbaaa[contains(., 'MONTO')]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//*[contains(text(), 'No se encontraron resultados') or contains(text(), 'sin resultados')]")
-                )
-        ));
-
-        try {
-            Thread.sleep(2000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    public void waitForMovimientosToLoad(Page page) {
+        String anyResultSelector = String.join(", ",
+                "bcp-data-table-bpbaaa.bcp-data-table-host",
+                "bcp-table-row-bpbaaa[index]",
+                "bcp-character-bpbaaa:has-text(\"FECHA\")",
+                "bcp-character-bpbaaa:has-text(\"DESCRIPCIÓN\")",
+                "bcp-character-bpbaaa:has-text(\"MONTO\")",
+                "*:has-text(\"No se encontraron resultados\")",
+                "*:has-text(\"sin resultados\")"
+        );
+        page.waitForSelector(anyResultSelector,
+                new Page.WaitForSelectorOptions().setTimeout(30_000));
+        MetodsGeneric.randomWaitPage(page, 1000, 2000);
     }
 
-    public List<Map<String, Object>> extractMovimientosData(WebDriver driver) {
+    public List<Map<String, Object>> extractMovimientosData(Page page) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
-
         try {
-            if (!hasMovimientosResults(driver)) {
+            if (!hasMovimientosResults(page)) {
                 log.info("No se encontraron movimientos");
                 return movimientos;
             }
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("bcp-data-table-bpbaaa")));
+            page.waitForSelector("bcp-data-table-bpbaaa",
+                    new Page.WaitForSelectorOptions().setTimeout(5_000));
 
-            int totalPages = getTotalPages(driver);
+            int totalPages = getTotalPages(page);
 
-            extractPageData(driver, movimientos);
+            extractPageData(page, movimientos);
 
             if (totalPages > 1) {
                 for (int currentPage = 2; currentPage <= totalPages; currentPage++) {
-                    navigateToPage(driver, currentPage);
-                    wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("bcp-data-table-bpbaaa")));
-
-                    extractPageData(driver, movimientos);
+                    navigateToPage(page, currentPage);
+                    page.waitForSelector("bcp-data-table-bpbaaa",
+                            new Page.WaitForSelectorOptions().setTimeout(5_000));
+                    extractPageData(page, movimientos);
                 }
             }
-
         } catch (Exception e) {
             log.warn("Error extrayendo datos de movimientos: {}", e.getMessage());
         }
-
         return movimientos;
     }
 
-    public boolean selectCuentaHistorico(WebDriver driver, String numeroCuenta) {
+    public boolean selectCuentaHistorico(Page page, String numeroCuenta) {
         try {
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            if (!seleccionarTabCuentasXpath(wait)) {
+            // Asegura que la pestaña Cuentas esté abierta
+            if (!clickAccountsTab(page)) {
                 log.warn("No se pudo abrir la pestaña de cuentas");
                 return false;
             }
 
             String objetivo = numeroCuenta.replaceAll("\\D", "");
 
-            List<WebElement> filas = wait.until(
-                    ExpectedConditions.visibilityOfAllElementsLocatedBy(
-                            By.cssSelector("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]")
-                    )
-            );
+            Locator filas = page.locator("div.table-container div.cols-center-container bcp-table-row-9nbaaa[index]");
+            filas.first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(8_000));
 
-            for (WebElement fila : filas) {
-                WebElement celdaCuenta = fila.findElement(
-                        By.cssSelector("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text")
-                );
+            long total = filas.count();
+            for (int i = 0; i < total; i++) {
+                Locator fila = filas.nth(i);
+                Locator celdaCuenta = fila.locator("bcp-table-col-9nbaaa[index='0'] p.paragraph-sm.bcp-font-demi.text");
+                if (celdaCuenta.count() == 0) continue;
 
-                String cuentaTabla = celdaCuenta.getText().replaceAll("\\D", "");
-                if (!objetivo.equals(cuentaTabla)) {
-                    continue;
-                }
+                String cuentaTabla = celdaCuenta.first().innerText().replaceAll("\\D", "");
+                if (!objetivo.equals(cuentaTabla)) continue;
 
                 log.debug("Cuenta {} encontrada, preparando click en histórico", numeroCuenta);
 
-                new Actions(driver).moveToElement(fila).pause(Duration.ofMillis(200)).perform();
+                // Hover para mostrar iconos
+                fila.hover(new Locator.HoverOptions().setTimeout(2_000));
+                page.waitForTimeout(200);
 
-                WebElement iconoHistorico = fila.findElement(
-                        By.cssSelector(".options-container bcp-icon-9nbaaa[name='clock-b']")
-                );
+                Locator iconoHistorico = fila.locator(".options-container bcp-icon-9nbaaa[name='clock-b']");
+                if (iconoHistorico.count() == 0) {
+                    log.warn("No se encontró el ícono de histórico en la fila de la cuenta {}", numeroCuenta);
+                    return false;
+                }
 
-                wait.until(ExpectedConditions.elementToBeClickable(iconoHistorico));
-                clickWithFallback(driver, iconoHistorico);
-
-                esperarPantallaHistorico(wait);
+                MetodsGeneric.clickWithFallback(page, iconoHistorico, 5_000);
+                esperarPantallaHistorico(page);
                 return true;
             }
 
             log.warn("No se encontró la cuenta {}", numeroCuenta);
             return false;
-
+        } catch (TimeoutError te) {
+            log.warn("Timeout seleccionando cuenta {}: {}", numeroCuenta, te.getMessage());
+            return false;
         } catch (Exception e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-                throw new BcpException("Interrupción durante la navegación",
-                        "BCP_NAVIGATION_INTERRUPTED",
-                        "El proceso fue interrumpido durante la navegación");
-            }
             log.warn("Error seleccionando cuenta {}: {}", numeroCuenta, e.getMessage());
             return false;
         }
     }
 
-    public void applyFiltersHistorico(WebDriver driver) {
+    public void applyFiltersHistorico(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+            Locator buscarBtn = page.locator("bcp-button-bpbaaa[id-auto='search-movements-button'] >> button");
 
-            wait.until(ExpectedConditions.elementToBeClickable(
-                    By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']//button")
-            ));
-
-            WebElement buscarBtn = driver.findElement(
-                    By.xpath("//bcp-button-bpbaaa[@id-auto='search-movements-button']//button")
-            );
+            buscarBtn.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(10_000));
 
             if (!buscarBtn.isEnabled()) {
                 log.warn("El botón de búsqueda está deshabilitado, verificando validaciones...");
-
-                driver.findElement(By.tagName("body")).click();
-                Thread.sleep(1000);
-
+                page.locator("body").click();
+                page.waitForTimeout(1_000);
                 if (!buscarBtn.isEnabled()) {
                     throw new BcpException("Botón de búsqueda permanece deshabilitado después de ingresar fechas");
                 }
             }
 
-            buscarBtn.click();
+            buscarBtn.click(new Locator.ClickOptions().setTimeout(5_000));
+            log.info("Búsqueda de movimientos historicos ejecutada exitosamente");
 
-            log.info("Búsqueda de movimientos ejecutada exitosamente");
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
-            log.warn("Error aplicando filtros de búsqueda: {}", e.getMessage());
+            log.warn("Error aplicando filtros de búsqueda hisotrica: {}", e.getMessage());
             throw new BcpException("No se pudo ejecutar la búsqueda");
         }
     }
 
-    public void openProfileDropdown(WebDriver driver) {
+    public void openProfileDropdown(Page page) {
         try {
             log.debug("Buscando dropdown de perfil...");
 
@@ -530,8 +397,8 @@ public class BcpMenuServiceImpl implements BcpMenuService {
                     "bcp-avatar"
             };
 
-            for (String selector : dropdownSelectors) {
-                if(abreProfileDropdown(driver, selector)){
+            for (String sel : dropdownSelectors) {
+                if (abreProfileDropdown(page, sel)) {
                     break;
                 }
             }
@@ -540,36 +407,32 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         }
     }
 
-    public void clickLogoutButton(WebDriver driver) {
+    public void clickLogoutButton(Page page) {
         try {
             log.debug("Buscando botón de logout en footer-container...");
 
             String[] logoutSelectors = {
-                    "//div[@class='footer-container']//bcp-button[@mode='light']//*[normalize-space()='Cerrar sesión']",
-                    "//div[@class='footer-container']//bcp-button[@class='bcp-button-host-4-27-0 hydrated']//*[normalize-space()='Cerrar sesión']",
-                    "//div[@class='footer-container']//*[normalize-space()='Cerrar sesión']",
-                    "//div[@class='footer-container']//bcp-icon[@name='sign-out-r']/following-sibling::text()[contains(., 'Cerrar sesión')]/..",
-                    "div.footer-container > bcp-button[type='button']",
-                    "div.footer-container bcp-button[mode='light']",
-                    "//div[@class='footer-container']//bcp-button//a[contains(@class, 'bcp-ffw-btn')]//span[normalize-space()='Cerrar sesión']"
+                    "div.footer-container bcp-button a.bcp-ffw-btn",
+                    "div.footer-container bcp-icon[name='sign-out-r']",
+                    "xpath=//div[@class='footer-container']//span[contains(@class,'character-container') and contains(normalize-space(),'Cerrar sesión')]"
             };
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            for (String selector : logoutSelectors) {
-                if(validaClicLogoutButton(driver, wait, selector)) {
-                    break;
+            for (String sel : logoutSelectors) {
+                if (validaClicLogoutButton(page, sel)) {
+                    return;
                 }
             }
 
-        } catch (Exception e) {
-            log.error("Error haciendo click en logout: {}", e.getMessage());
             throw new BcpException("No se pudo hacer logout", "BCP_LOGOUT_CLICK_ERROR",
                     "No se pudo encontrar el botón de cerrar sesión");
+
+        } catch (Exception e) {
+            log.error("Error haciendo click en logout: {}", e.getMessage());
+            throw e;
         }
     }
 
-    public void handleNpsSurvey(WebDriver driver) {
+    public void handleNpsSurvey(Page page) {
         try {
             log.debug("Verificando si aparece encuesta NPS...");
 
@@ -578,14 +441,12 @@ public class BcpMenuServiceImpl implements BcpMenuService {
                     "lib-nps",
                     ".nps",
                     "[class*='nps__']",
-                    "bcp-paragraph:contains('Según tu experiencia')",
-                    "bcp-paragraph:contains('recomiendes')"
+                    "bcp-paragraph:has-text(\"Según tu experiencia\")",
+                    "bcp-paragraph:has-text(\"recomiendes\")"
             };
 
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            for (String selector : npsSelectors) {
-                if(buscaEncuesta(driver, wait, selector)){
+            for (String sel : npsSelectors) {
+                if (buscaEncuesta(page, sel)) {
                     break;
                 }
             }
@@ -594,25 +455,26 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         }
     }
 
-    public boolean verifyLogoutSuccess(WebDriver driver) {
+    public boolean verifyLogoutSuccess(Page page) {
         try {
             String[] logoutIndicators = {
                     "input[name='ciam-input-card']",
-                    "//button//span[normalize-space()='Continuar']",
+                    "button:has-text(\"Continuar\")",
                     "[class*='login']",
-                    "body:not(:has(.dashboard))"
+                    "xpath=//button[.//span[normalize-space()='Continuar']]"
             };
 
-            boolean logoutDetected = checkAnyLogoutIndicator(driver, logoutIndicators);
-            if (logoutDetected) {
+            if (checkAnyLogoutIndicator(page, logoutIndicators)) {
                 return true;
             }
 
-            String currentUrl = driver.getCurrentUrl();
+            String currentUrl = page.url();
             if (currentUrl != null &&
                     (currentUrl.contains("login") ||
                             currentUrl.contains("tarjeta-sesion") ||
-                            currentUrl.contains("loginunico"))) {
+                            currentUrl.contains("loginunico") ||
+                            currentUrl.contains("/auth") ||
+                            currentUrl.contains("/ciam"))) {
                 log.debug("Logout verificado por cambio de URL: {}", currentUrl);
                 return true;
             }
@@ -625,187 +487,178 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         }
     }
 
-    /**
-     * Seleccionar tab con selectores xpath
-     * @param wait tiempo de espera para busqueda
-     * @return {@link boolean}
-     */
-    private boolean seleccionarTabCuentasXpath(WebDriverWait wait) {
+    public void manejarModalSesionExpirada(Page page) {
         try {
-            WebElement tabElement = wait.until(ExpectedConditions.elementToBeClickable(By.xpath(
-                    "//bcp-tab-header-9nbaaa//button[.//span[normalize-space()='Cuentas']]"
-            )));
+            Locator modal = MetodsGeneric.waitForVisible(page, "bcp-modal[is-open]", 5_000);
+            Locator titulo = modal.locator("h3.title-sm");
+            if (titulo.count() == 0 || !titulo.first().innerText().contains("expirado")) {
+                log.debug("Modal visible pero no es de sesión expirada");
+                return;
+            }
 
-            tabElement.click();
-            log.debug("Tab 'Cuentas' clickeado con XPath específico");
-            Thread.sleep(500);
-            return true;
+            log.info("Modal 'Tu sesión ha expirado' detectado, haciendo click en 'Iniciar sesión'");
 
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-            return false;
+            Locator btnIniciarSesion = MetodsGeneric.waitForVisible(
+                    page,
+                    "bcp-button-ntlc-commons-widgets[id-auto='modal-manager-secondary'] button",
+                    5_000
+            );
+
+            MetodsGeneric.clickWithFallback(page, btnIniciarSesion, 5_000);
+
+            // Esperar redirección al login de viabcp
+            page.waitForURL("**/tarjeta-sesion**", new Page.WaitForURLOptions().setTimeout(15_000));
+            log.info("Redirigido al login: {}", page.url());
+        } catch (TimeoutError te) {
+            log.warn("Timeout esperando redirección al login: {}", te.getMessage());
+            throw new BcpException("No se pudo navegar al login", "BCP_LOGIN_REDIRECT_ERROR", te.getMessage());
         } catch (Exception e) {
-            log.debug("XPath específico también falló: {}", e.getMessage());
-            return false;
+            log.warn("Error manejando modal de sesión expirada: {}", e.getMessage());
+            throw new BcpException("Error en modal de sesión expirada", "BCP_MODAL_ERROR", e.getMessage());
+        }
+    }
+
+    public boolean clickAccountsTab(Page page) {
+        log.debug("Buscando tab 'Cuentas'...");
+        try {
+            Locator tab = MetodsGeneric.waitForVisible(
+                    page,
+                    "xpath=//bcp-tab-header-9nbaaa//button[.//span[normalize-space()='Cuentas']]",
+                    5_000);
+
+
+            MetodsGeneric.clickWithFallback(page, tab, 5_000);
+
+            MetodsGeneric.randomWaitPage(page, 200, 500);
+
+            log.debug("Tab 'Cuentas' clickeado con XPath específico");
+            return true;
+        } catch (TimeoutError e) {
+            log.error("Se supero tiempo de espera haciendo click en tab Cuentas: {}", e.getMessage());
+            throw new BcpException("No se pudo acceder a la sección de cuentas",
+                    "BCP_ACCOUNTS_TAB_ERROR",
+                    "No se pudo encontrar el tab de Cuentas");
+        } catch (Exception e) {
+            log.error("Error haciendo click en tab Cuentas: {}", e.getMessage());
+            throw new BcpException("No se pudo acceder a la sección de cuentas",
+                    "BCP_ACCOUNTS_TAB_ERROR",
+                    "No se pudo encontrar el tab de Cuentas");
         }
     }
 
     /**
      * Espera a que cargue la página de busqueda historica
      *
-     * @param wait datos de pagina a ubicar
+     * @param page datos de pagina a ubicar
      */
-    private void esperarPantallaHistorico(WebDriverWait wait) {
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.urlContains("movimientos"),
-                ExpectedConditions.urlContains("historico"),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.cssSelector("ibk-historical-date ibk-datepicker-range-v2")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.cssSelector("[data-test='btnBuscarMovimientos'], [data-test='btnEnter']")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//*[contains(@class,'historical-movements__filters')]")
-                )
-        ));
+    private void esperarPantallaHistorico(Page page) {
+        try {
+            page.waitForURL("**movimientos**", new Page.WaitForURLOptions().setTimeout(6_000));
+            return;
+        } catch (TimeoutError ignored) {
+            log.error("Se supero tiempo de espera para pantalla de movimientos");
+        }
+
+        try {
+            page.waitForURL("**historico**", new Page.WaitForURLOptions().setTimeout(6_000));
+            return;
+        } catch (TimeoutError ignored) {
+            log.error("Se supero tiempo de espera para pantalla de historico");
+        }
+
+        // Luego por selectores clave
+        String[] selectores = {
+                "ibk-historical-date ibk-datepicker-range-v2",
+                "[data-test='btnBuscarMovimientos']",
+                "[data-test='btnEnter']",
+                "xpath=//*[contains(@class,'historical-movements__filters')]"
+        };
+        for (String sel : selectores) {
+            try {
+                page.waitForSelector(sel,
+                        new Page.WaitForSelectorOptions()
+                                .setState(WaitForSelectorState.VISIBLE)
+                                .setTimeout(6_000));
+                return;
+            } catch (TimeoutError ignored) {
+                log.error("Se supero tiempo de espera para encontrar selector");
+            }
+        }
     }
 
     /**
      * Espera a que cargue la pagina de detalle
      *
-     * @param wait datos de pagina a ubicar
+     * @param page datos de pagina a ubicar
      */
-    private void esperarPantallaDetalle(WebDriverWait wait) {
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.urlContains("detalle"),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.cssSelector("ibk-account-detail, ibk-account-detail-info")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.xpath("//*[contains(text(), 'Detalle') and contains(text(), 'cuenta')]")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.cssSelector("bcp-input-bpbaaa[name='inputDateFrom']")
-                ),
-                ExpectedConditions.visibilityOfElementLocated(
-                        By.cssSelector("bcp-button-bpbaaa[id-auto='clean-fiters-account-detail']")
-                )
-        ));
-    }
-
-    /**
-     * Clickea en el boton de historico correspondiente a la fila encontrada
-     *
-     * @param driver manejador de páginas
-     * @param element elemento ubicado
-     */
-    private void clickWithFallback(WebDriver driver, WebElement element) {
+    private void esperarPantallaDetalle(Page page) {
         try {
-            element.click();
-        } catch (ElementNotInteractableException ex) {
-            JavascriptExecutor js = (JavascriptExecutor) driver;
-            js.executeScript("arguments[0].scrollIntoView({block:'center'});", element);
-            js.executeScript("arguments[0].click();", element);
+            page.waitForURL("**detalle**", new Page.WaitForURLOptions().setTimeout(8_000));
+            return;
+        } catch (TimeoutError ignored) {
+            log.error("Se supero tiempo de espera para pagina de detalle");
         }
-    }
 
-    /**
-     * Ubicar elementos del tab de cuentas
-     *
-     * @param driver manejador de páginas
-     * @param selector elemento html
-     * @return {@link boolean}
-     */
-    private boolean verificarPaginaCuentas(WebDriver driver,
-                                           String selector) {
-        try {
-            List<WebElement> elements = driver.findElements(By.cssSelector(selector));
-            if (!elements.isEmpty() && elements.get(0).isDisplayed()) {
-                log.debug("Ya en página de cuentas - indicador: {}", selector);
-                return true;
+        String[] selectores = {
+                "ibk-account-detail",
+                "ibk-account-detail-info",
+                "bcp-input-bpbaaa[name='inputDateFrom']",
+                "bcp-button-bpbaaa[id-auto='clean-fiters-account-detail']",
+                "xpath=//*[contains(text(), 'Detalle') and contains(text(), 'cuenta')]"
+        };
+
+        for (String sel : selectores) {
+            try {
+                page.waitForSelector(sel, new Page.WaitForSelectorOptions()
+                        .setState(WaitForSelectorState.VISIBLE)
+                        .setTimeout(6_000));
+                return;
+            } catch (TimeoutError ignored) {
+                log.error("Se supero tiempo de espera para ubicar la pantalla de detalle de cuenta");
             }
-            return false;
-        } catch (Exception e) {
-            log.debug("Indicador {} no visible: {}", selector, e.getMessage());
-            return false;
         }
     }
 
     /**
      * Extrae saldos y cuentas fila a fila
+     *
      * @param row fila
      * @return {@link Map} datos de una cuenta por fila
      */
-    private Map<String, Object> extractAccountFromRow(WebElement row) {
+    private Map<String, Object> extractAccountFromRow(Locator row) {
         Map<String, Object> account = new HashMap<>();
 
         try {
+            row.locator("p").first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(300));
+
             // 1. Número de cuenta
-            WebElement numeroCuentaElement = row.findElement(By.xpath(
-                    ".//bcp-paragraph-9nbaaa[@size='sm' and @color='text' and @family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
-            ));
-            String numeroCuenta = numeroCuentaElement.getText().trim();
+            Locator numeroCuentaElement = row.locator("xpath=.//bcp-paragraph-9nbaaa//p[contains(@class, 'paragraph-sm')]").first();
+            String numeroCuenta = numeroCuentaElement.innerText().trim();
             numeroCuenta = MetodsGeneric.cleanAccountNumber(numeroCuenta);
             account.put(Constantes.KEY_NUMERO_CUENTA, numeroCuenta);
 
             // 2. Moneda
-            WebElement monedaElement = row.findElement(By.xpath(
-                    ".//bcp-table-col-9nbaaa[@index='3']//bcp-paragraph-9nbaaa/p[@class='paragraph-sm bcp-font-regular onsurface-800']"
-            ));
-            String moneda = monedaElement.getText().trim();
-            account.put(Constantes.KEY_MONEDA, moneda.equals("Soles") ? "PEN" : "USD");
+            Locator monedaElement = row.locator("xpath=.//bcp-table-col-9nbaaa[@index='3']//p").first();
+            String moneda = monedaElement.innerText().trim();
+            account.put(Constantes.KEY_MONEDA, moneda.toLowerCase().contains("sol") ? "PEN" : "USD");
 
-            // 3. Saldo disponible
-            WebElement saldoDisponibleElement = null;
-            List<WebElement> elements = row.findElements(By.xpath(
-                    ".//bcp-table-col-9nbaaa[@index='4']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
-            ));
-            if (!elements.isEmpty()) {
-                saldoDisponibleElement = elements.get(0);
-            } else {
-                elements = row.findElements(By.xpath(
-                        ".//bcp-table-col-9nbaaa[@index='4']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi error']"
-                ));
-                if (!elements.isEmpty()) {
-                    saldoDisponibleElement = elements.get(0);
-                }
-            }
-            if (saldoDisponibleElement == null) {
-                log.warn("No se pudo encontrar el elemento de saldo disponible");
-                return Collections.emptyMap();
+            // 3. Saldo disponible (texto o error)
+            Locator colSaldoDisp = row.locator("xpath=.//bcp-table-col-9nbaaa[@index='4']//p").first();
+            if (colSaldoDisp.count() > 0) {
+                String saldoStr = colSaldoDisp.innerText().trim();
+                account.put(Constantes.KEY_SALDO_DISP, MetodsGeneric.parseSaldo(saldoStr));
             }
 
-            String saldoDisponibleStr = saldoDisponibleElement.getText().trim();
-            double saldoDisponible = MetodsGeneric.parseSaldo(saldoDisponibleStr);
-            account.put(Constantes.KEY_SALDO_DISP, saldoDisponible);
-
-            // 4. Saldo contable
-            WebElement saldoContableElement = null;
-            List<WebElement> elementsc = row.findElements(By.xpath(
-                    ".//bcp-table-col-9nbaaa[@index='6']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi text']"
-            ));
-            if (!elementsc.isEmpty()) {
-                saldoContableElement = elementsc.get(0);
-            } else {
-                elementsc = row.findElements(By.xpath(
-                        ".//bcp-table-col-9nbaaa[@index='6']//bcp-paragraph-9nbaaa[@family='demi']/p[@class='paragraph-sm bcp-font-demi error']"
-                ));
-                if (!elementsc.isEmpty()) {
-                    saldoContableElement = elementsc.get(0);
-                }
+            // 4. Saldo contable (texto o error)
+            Locator colSaldoCont = row.locator("xpath=.//bcp-table-col-9nbaaa[@index='6']//p").first();
+            if (colSaldoCont.count() > 0) {
+                String saldoStr = colSaldoCont.innerText().trim();
+                account.put(Constantes.KEY_SALDO_CONT, MetodsGeneric.parseSaldo(saldoStr));
             }
-            if (saldoContableElement == null) {
-                log.warn("No se pudo encontrar el elemento de saldo disponible");
-                return Collections.emptyMap();
-            }
-
-            String saldoContableStr = saldoContableElement.getText().trim();
-            double saldoContable = MetodsGeneric.parseSaldo(saldoContableStr);
-            account.put(Constantes.KEY_SALDO_CONT, saldoContable);
 
             return account;
-
         } catch (Exception e) {
             log.error("Error extrayendo datos de fila: {}", e.getMessage());
             return Collections.emptyMap();
@@ -815,26 +668,21 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Verifica si hubo errores en el formulario
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    private boolean checkForLoginErrors(WebDriver driver) {
+    private boolean checkForLoginErrors(Page page) {
         try {
-            List<WebElement> errorElements = driver.findElements(
-                    By.cssSelector("bcp-alert, .alertConf, [class*='error'], [class*='alert']")
-            );
-
-            for (WebElement errorElement : errorElements) {
-                String errorText = errorElement.getText().toLowerCase();
-
-                if (errorText.contains("error") || errorText.contains("incorrecto") ||
-                        errorText.contains("inválido") || errorText.contains("captcha")) {
-
-                    log.error("Error detectado en página: {}", errorText);
+            Locator errs = page.locator("bcp-alert, .alertConf, [class*='error'], [class*='alert']");
+            int count = errs.count();
+            for (int i = 0; i < count; i++) {
+                String txt = errs.nth(i).innerText().toLowerCase();
+                if (txt.contains("error") || txt.contains("incorrecto")
+                        || txt.contains("inválido") || txt.contains("captcha")) {
+                    log.error("Error detectado en página: {}", txt);
                     return true;
                 }
             }
-
             return false;
 
         } catch (Exception e) {
@@ -846,16 +694,16 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Espera y verifica si el login fue satisfactorio
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      * @throws InterruptedException si hubo interrupcion
      */
-    private boolean waitAndVerifyLoginSuccess(WebDriver driver) throws InterruptedException {
+    private boolean waitAndVerifyLoginSuccess(Page page) throws InterruptedException {
         waitForPageStabilization();
 
-        boolean menuVisible = isSideMenuVisible(driver);
-        boolean dashboardLoaded = isDashboardLoaded(driver);
-        boolean userProfileVisible = isUserProfileVisible(driver);
+        boolean menuVisible = isSideMenuVisible(page);
+        boolean dashboardLoaded = isDashboardLoaded(page);
+        boolean userProfileVisible = isUserProfileVisible(page);
 
         log.debug("Indicadores login - Menu: {}, Dashboard: {}, Perfil: {}",
                 menuVisible, dashboardLoaded, userProfileVisible);
@@ -876,26 +724,21 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Verifica si el menú lateral está visible como indicador de login exitoso
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    private boolean isSideMenuVisible(WebDriver driver) {
+    private boolean isSideMenuVisible(Page page) {
         try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            WebElement sideMenu = wait.until(
-                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector("bcp-menu-sidebar"))
-            );
+            Locator sideMenu = MetodsGeneric.waitForVisible(page, "bcp-menu-sidebar", 5_000);
 
-            boolean isMenuVisible = sideMenu.isDisplayed();
-            log.info("Menú lateral encontrado y visible: {}", isMenuVisible);
+            boolean visible = sideMenu.isVisible();
+            log.info("Menú lateral encontrado y visible: {}", visible);
 
-            WebElement cuentas = driver.findElement(By.xpath("//bcp-menu-sidebar//p[normalize-space()='Cuentas']"));
-            if (cuentas.isDisplayed()) {
+            Locator cuentas = page.locator("//bcp-menu-sidebar//p[normalize-space()='Cuentas']");
+            if (cuentas.count() > 0 && cuentas.first().isVisible()) {
                 log.info("Opción 'Cuentas' encontrada dentro del menú.");
             }
-
-            return isMenuVisible;
-
+            return visible;
         } catch (Exception e) {
             log.warn("No se pudo encontrar/verificar el menú lateral: {}", e.getMessage());
             return false;
@@ -905,24 +748,24 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Verifica si cargó el dashboard
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    private boolean isDashboardLoaded(WebDriver driver) {
+    private boolean isDashboardLoaded(Page page) {
         try {
-            String[] dashboardSelectors = {
-                    "h1.title-lg", // Título "Resumen de cuentas"
-                    ".card-balance__box", // Tarjetas de saldo
-                    "bcp-chart-line-9nbaaa", // Gráfico de líneas
-                    "app-dashboard", // Componente Angular
-                    ".dashboard__summary", // Sección resumen
-                    "[class*='dashboard__']" // Cualquier elemento con clase que contenga "dashboard__"
+            String[] selectors = {
+                    "h1.title-lg",
+                    ".card-balance__box",
+                    "bcp-chart-line-9nbaaa",
+                    "app-dashboard",
+                    ".dashboard__summary",
+                    "[class*='dashboard__']"
             };
-
-            for (String selector : dashboardSelectors) {
-                return verificarLoadedDashboard(driver, selector);
+            for (String sel : selectors) {
+                if (buscaElemento(page, sel)) {
+                    return true;
+                }
             }
-
             log.error("Ningún selector de dashboard fue encontrado");
             return false;
 
@@ -933,60 +776,27 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     }
 
     /**
-     * Verifica si el dashboard se cargó
-     * @param driver manejador de página
-     * @param selector elemento html
-     * @return {@link boolean}
-     */
-    private boolean verificarLoadedDashboard(WebDriver driver,
-                                             String selector) {
-        try {
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            WebElement element = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
-
-            if (element.isDisplayed()) {
-                log.debug("Dashboard encontrado con selector: {}", selector);
-
-                if (selector.equals("h1.title-lg")) {
-                    String titleText = element.getText();
-                    if (titleText.contains("Resumen de cuentas")) {
-                        log.info("Título del dashboard confirmado: {}", titleText);
-                        return true;
-                    }
-                }
-                return true;
-            }
-            return false;
-        } catch (Exception e) {
-            log.error("Selector {} no encontrado: {}", selector, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
      * Verifica si se muestra perfil de usuario
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    private boolean isUserProfileVisible(WebDriver driver) {
+    private boolean isUserProfileVisible(Page page) {
         try {
-            String[] profileSelectors = {
-                    "bcp-avatar[accessible-aria-label*='Avatar']", // Selector específico del avatar
-                    ".avatar-container", // Contenedor del avatar
-                    ".bcp-character", // Componente de caracteres
-                    ".character-lg", // Texto grande (iniciales del usuario)
-                    "[aria-label*='Avatar']", // Cualquier elemento con "Avatar" en el label
-                    "[class*='avatar']", // Clases que contengan "avatar"
-                    "bcp-avatar" // El componente de avatar directamente
+            String[] selectors = {
+                    "bcp-avatar[accessible-aria-label*='Avatar']",
+                    ".avatar-container",
+                    ".bcp-character",
+                    ".character-lg",
+                    "[aria-label*='Avatar']",
+                    "[class*='avatar']",
+                    "bcp-avatar"
             };
-
-            WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-            for (String selector : profileSelectors) {
-                return buscaElementoPerfil(wait, selector);
+            for (String sel : selectors) {
+                if (buscaElemento(page, sel)) {
+                    return true;
+                }
             }
-
             return false;
         } catch (Exception e) {
             log.debug("Error verificando perfil de usuario: {}", e.getMessage());
@@ -997,20 +807,15 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Busca si cargo el perfil
      *
-     * @param wait espera del manejador de página
+     * @param page     Manejador de página
      * @param selector elemento html
      * @return {@link boolean}
      */
-    private boolean buscaElementoPerfil(WebDriverWait wait,
-                                        String selector){
+    private boolean buscaElemento(Page page, String selector) {
         try {
-            List<WebElement> elements = wait.until(ExpectedConditions.visibilityOfAllElementsLocatedBy(By.cssSelector(selector)));
-            if (!elements.isEmpty()) {
-                log.debug("Perfil de usuario encontrado con selector: {}", selector);
-                return true;
-            }
-            return false;
-        } catch (TimeoutException e) {
+            Locator loc = page.locator(selector);
+            return loc.count() != 0;
+        } catch (TimeoutError e) {
             log.debug("Selector {} no encontrado dentro del tiempo de espera", selector);
             return false;
         } catch (Exception e) {
@@ -1021,143 +826,59 @@ public class BcpMenuServiceImpl implements BcpMenuService {
 
     /**
      * Abre dropdown de perfil
-     * @param driver manejador de página
+     *
+     * @param page     manejador de página
      * @param selector elemento html
      */
-    private boolean abreProfileDropdown(WebDriver driver,
-                                        String selector) {
+    private boolean abreProfileDropdown(Page page, String selector) {
         try {
-            WebElement dropdown = driver.findElement(By.cssSelector(selector));
-            if (dropdown.isDisplayed()) {
-                dropdown.click();
-                log.debug("Dropdown de perfil abierto con selector: {}", selector);
-                Thread.sleep(500);
-                return true;
-            }
-            return false;
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-            log.error("Selector {} no funcionó al intentar abrir perfil: {}", selector, e.getMessage());
-
+            Locator dropdown = MetodsGeneric.waitForVisible(page, selector, 3_000);
+            MetodsGeneric.clickWithFallback(page, dropdown, 3_000);
+            log.debug("Dropdown de perfil abierto con selector: {}", selector);
+            return true;
+        } catch (Exception e) {
+            log.debug("Selector {} no funcionó al intentar abrir perfil: {}", selector, e.getMessage());
             return false;
         }
     }
 
     /**
      * Validar el elemento del logout para realizar clic
-     * @param driver manejador de página
-     * @param wait tiempo de espera al ubicar elemento
+     *
+     * @param page     manejador de página
      * @param selector elemento html
      * @return {@link boolean}
      */
-    private boolean validaClicLogoutButton(WebDriver driver,
-                                           WebDriverWait wait,
-                                           String selector) {
+    private boolean validaClicLogoutButton(Page page, String selector) {
         try {
-            WebElement element;
+            Locator element = MetodsGeneric.waitForVisible(page, selector, 5_000);
 
-            if (selector.startsWith("//")) {
-                element = wait.until(ExpectedConditions.elementToBeClickable(By.xpath(selector)));
-            } else {
-                element = wait.until(ExpectedConditions.elementToBeClickable(By.cssSelector(selector)));
-            }
+            MetodsGeneric.clickWithFallback(page, element, 5_000);
 
-            if (isValidLogoutButton(element)) {
-                clickElementWithRetry(element, driver);
-                log.debug("Botón de logout clickeado con selector: {}", selector);
-                Thread.sleep(2000);
-                return true;
-            }
+            log.debug("Botón de logout clickeado con selector: {}", selector);
 
-            return false;
-        } catch (InterruptedException interr) {
-            handleInterruptedException(interr);
-            log.error("Se interrumpe clic: {}", interr.getMessage());
+            MetodsGeneric.randomWaitPage(page, 1_000, 2_000);
+            return true;
+        } catch (TimeoutError te) {
+            log.debug("Selector {} no visible/clicable a tiempo: {}", selector, te.getMessage());
             return false;
         } catch (Exception e) {
-            log.error("Selector {} no funcionó: {}", selector, e.getMessage());
+            log.debug("Selector {} no funcionó: {}", selector, e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Valida si el boton de logout es válido
-     * @param element elemento en página
-     * @return {@link boolean}
-     */
-    private boolean isValidLogoutButton(WebElement element) {
+    private boolean buscaEncuesta(Page page, String selector) {
         try {
-            if (!element.isDisplayed() || !element.isEnabled()) {
-                return false;
-            }
-
-            String text = element.getText().toLowerCase();
-            String tagName = element.getTagName().toLowerCase();
-
-            boolean hasLogoutText = text.contains("cerrar") ||
-                    text.contains("logout") ||
-                    text.contains("salir") ||
-                    text.contains("sign out");
-
-            boolean isClickable = tagName.equals("a") ||
-                    tagName.equals("button") ||
-                    tagName.equals("input");
-
-            return hasLogoutText && isClickable;
-
-        } catch (Exception e) {
-            log.debug("Error validando botón de logout: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Hace clic en el elemento de cerrar sesión
-     * @param element elemento en la página
-     * @param driver manejador de página
-     */
-    private void clickElementWithRetry(WebElement element, WebDriver driver) {
-        try {
-            element.click();
-        } catch (Exception e) {
-            log.debug("Click normal falló, intentando con JavaScript: {}", e.getMessage());
-
-            try {
-                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", element);
-            } catch (Exception jsEx) {
-                log.debug("JavaScript click también falló: {}", jsEx.getMessage());
-
-                try {
-                    ((JavascriptExecutor) driver).executeScript(
-                            "arguments[0].style.display='block'; arguments[0].style.visibility='visible';", element);
-                    Thread.sleep(500);
-                    element.click();
-                } catch (InterruptedException interr) {
-                    handleInterruptedException(interr);
-                    log.warn("Se interrumpe click en logout: {}", interr.getMessage());
-                } catch (Exception finalEx) {
-                    throw new BcpException("No se pudo hacer click en el elemento");
-                }
-            }
-        }
-    }
-
-    private boolean buscaEncuesta(WebDriver driver,
-                                  WebDriverWait wait,
-                                  String selector) {
-        try {
-            WebElement survey = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(selector)));
-            if (survey.isDisplayed()) {
-                log.debug("Encuesta NPS detectada, cerrando...");
-                closeNpsSurvey(driver);
-                return true;
-            }
-            return false;
-        } catch (TimeoutException e) {
-            log.error("Tiempo de espera sobrepasado");
+            MetodsGeneric.waitForVisible(page, selector, 5_000);
+            log.debug("Encuesta NPS detectada, cerrando...");
+            closeNpsSurvey(page);
+            return true;
+        } catch (TimeoutError te) {
+            log.debug("No se encontró encuesta con selector {}: {}", selector, te.getMessage());
             return false;
         } catch (Exception e) {
-            log.error("Error verificando encuesta con selector {}: {}", selector, e.getMessage());
+            log.debug("Error verificando encuesta con selector {}: {}", selector, e.getMessage());
             return false;
         }
     }
@@ -1165,59 +886,45 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Cierra encuesta
      *
-     * @param driver manejador de pagina
+     * @param page manejador de pagina
      */
-    private void closeNpsSurvey(WebDriver driver) {
-        try {
-            String[] closeSelectors = {
-                    ".nps__close button",
-                    "bcp-button[shape='icon']",
-                    "bcp-icon[name='close-r']",
-                    "[aria-label*='close']",
-                    "[class*='close']"
-            };
+    private void closeNpsSurvey(Page page) {
+        String[] closeSelectors = {
+                ".nps__close button",
+                "bcp-button[shape='icon']",
+                "bcp-icon[name='close-r']",
+                "[aria-label*='close']",
+                "[class*='close']"
+        };
 
-            for (String selector : closeSelectors) {
-                boolean closed = tryCloseButtonWithSelector(driver, selector);
-                if (closed) {
-                    return;
-                }
+        for (String sel : closeSelectors) {
+            if (tryCloseButtonWithSelector(page, sel)) {
+                return;
             }
-
-            log.debug("No se pudo cerrar encuesta, esperando...");
-            Thread.sleep(3000); // Esperar a que posiblemente desaparezca sola
-
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-            log.warn("Error cerrando encuesta NPS: {}", e.getMessage());
         }
+
+        log.debug("No se pudo cerrar encuesta, esperando...");
+        MetodsGeneric.randomWaitPage(page, 2_000, 3_000);
     }
 
     /**
      * Hace clic en el boton de cerrar de la encuesta
      *
-     * @param driver manejador de pagina
+     * @param page     manejador de pagina
      * @param selector selector de elemento
      * @return {@link boolean}
      */
-    private boolean tryCloseButtonWithSelector(WebDriver driver, String selector) {
+    private boolean tryCloseButtonWithSelector(Page page, String selector) {
         try {
-            WebElement closeButton = driver.findElement(By.cssSelector(selector));
-            if (closeButton.isDisplayed() && closeButton.isEnabled()) {
-                closeButton.click();
+            Locator closeButton = MetodsGeneric.waitForVisible(page, selector, 3_000);
+            if (closeButton.count() > 0 && closeButton.isVisible() && closeButton.isEnabled()) {
+                MetodsGeneric.clickWithFallback(page, closeButton, 3_000);
                 log.debug("Encuesta NPS cerrada con selector: {}", selector);
-                Thread.sleep(2000);
+                MetodsGeneric.randomWaitPage(page, 1_500, 2_000);
                 return true;
             }
-        } catch (NoSuchElementException e) {
-            log.debug("Selector {} no encontrado: {}", selector, e.getMessage());
-        } catch (ElementNotInteractableException e) {
-            log.debug("Selector {} no es interactuable: {}", selector, e.getMessage());
-        } catch (InterruptedException e) {
-            handleInterruptedException(e);
-            log.debug("Interrupción con selector {}: {}", selector, e.getMessage());
         } catch (Exception e) {
-            log.debug("Error con selector de encuesta {}: {}", selector, e.getMessage());
+            log.debug("Selector {} no funcionó para cerrar encuesta: {}", selector, e.getMessage());
         }
         return false;
     }
@@ -1225,13 +932,13 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Chequea si hay algun selector que indique que se cerror la sesion exitosamente
      *
-     * @param driver maenjador de pagina
+     * @param page      maenjador de pagina
      * @param selectors selector a buscar
      * @return {@link boolean}
      */
-    private boolean checkAnyLogoutIndicator(WebDriver driver, String[] selectors) {
-        for (String selector : selectors) {
-            if (checkLogoutWithSelector(driver, selector)) {
+    private boolean checkAnyLogoutIndicator(Page page, String[] selectors) {
+        for (String sel : selectors) {
+            if (checkLogoutWithSelector(page, sel)) {
                 return true;
             }
         }
@@ -1241,47 +948,35 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     /**
      * Cuerpo de la comparacion de selector que verifica logout
      *
-     * @param driver manejador de pagina
+     * @param page     manejador de pagina
      * @param selector selector ubicar
      * @return {@link boolean}
      */
-    private boolean checkLogoutWithSelector(WebDriver driver, String selector) {
+    private boolean checkLogoutWithSelector(Page page, String selector) {
         try {
-            List<WebElement> elements = driver.findElements(By.cssSelector(selector));
-            if (!elements.isEmpty() && elements.get(0).isDisplayed()) {
+            Locator elements = page.locator(selector);
+            if (elements.count() > 0 && elements.first().isVisible()) {
                 log.debug("Logout verificado con selector: {}", selector);
                 return true;
             }
-        } catch (NoSuchElementException e) {
-            log.debug("Selector de verificacion de logout {} no encontrado: {}", selector, e.getMessage());
-        } catch (StaleElementReferenceException e) {
-            log.debug("Selector {} obsoleto: {}", selector, e.getMessage());
         } catch (Exception e) {
             log.debug("Selector {} no funcionó para verificar logout: {}", selector, e.getMessage());
         }
         return false;
     }
 
-    private boolean hasMovimientosResults(WebDriver driver) {
+    private boolean hasMovimientosResults(Page page) {
         try {
-            List<WebElement> filasResultados = driver.findElements(
-                    By.xpath("//bcp-table-row-bpbaaa[@index and not(contains(@class, 'header'))]")
-            );
-
-            List<WebElement> mensajeSinResultados = driver.findElements(
-                    By.xpath("//*[contains(text(), 'No se encontraron resultados') or contains(text(), 'sin resultados')]")
-            );
-
-            if (!filasResultados.isEmpty()) {
-                log.info("Se encontraron {} movimientos", filasResultados.size());
+            Locator filasResultados = page.locator("xpath=//bcp-table-row-bpbaaa[@index and not(contains(@class, 'header'))]");
+            if (filasResultados.count() > 0) {
+                log.info("Se encontraron {} movimientos", filasResultados.count());
                 return true;
             }
-
-            if (!mensajeSinResultados.isEmpty()) {
+            Locator mensajeSinResultados = page.locator("xpath=//*[contains(text(), 'No se encontraron resultados') or contains(text(), 'sin resultados')]");
+            if (mensajeSinResultados.count() > 0) {
                 log.info("No se encontraron movimientos para el rango de fechas especificado");
                 return false;
             }
-
             return false;
         } catch (Exception e) {
             log.warn("Error verificando resultados de movimientos: {}", e.getMessage());
@@ -1289,76 +984,54 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         }
     }
 
-    private int getTotalPages(WebDriver driver) {
+    private int getTotalPages(Page page) {
         try {
-            WebElement pagination = driver.findElement(By.cssSelector("bcp-pagination-bpbaaa"));
-            List<WebElement> pageItems = pagination.findElements(By.cssSelector("li.page"));
-            return pageItems.size();
+            Locator pages = page.locator("bcp-pagination-bpbaaa li.page");
+            long count = pages.count();
+            return count > 0 ? (int) count : 1;
         } catch (Exception e) {
             log.debug("No se encontró paginación, asumiendo 1 página");
             return 1;
         }
     }
 
-    private void navigateToPage(WebDriver driver, int pageNumber) {
-        try {
-            WebElement pageLink = driver.findElement(By.xpath("//li[@class='page' and contains(., '" + pageNumber + "')]"));
-            pageLink.click();
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BcpException("Interrupción durante la navegación",
-                    "BCP_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
-        } catch (Exception e) {
-            log.warn("Error navegando a página {}: {}", pageNumber, e.getMessage());
-        }
+    private void navigateToPage(Page page, int targetPage) {
+        Locator paginacion = MetodsGeneric.waitForVisible(page, "bcp-pagination-bpbaaa li.page >> text=\"" + targetPage + "\"", 4_000);
+        MetodsGeneric.clickWithFallback(page, paginacion, 3_000);
+        MetodsGeneric.randomWaitPage(page, 300, 600);
     }
 
-    private void extractPageData(WebDriver driver, List<Map<String, Object>> movimientos) {
+    private void extractPageData(Page page, List<Map<String, Object>> movimientos) {
         try {
-            List<WebElement> filas = driver.findElements(By.cssSelector("bcp-table-row-bpbaaa[index]"));
-
-            for (WebElement fila : filas) {
+            Locator filas = page.locator("bcp-table-row-bpbaaa[index]");
+            long total = filas.count();
+            for (int i = 0; i < total; i++) {
                 try {
-                    List<WebElement> columnas = fila.findElements(By.cssSelector("bcp-table-col-bpbaaa"));
+                    Locator fila = filas.nth(i);
+                    Locator columnas = fila.locator("bcp-table-col-bpbaaa");
+                    long cols = columnas.count();
+                    if (cols >= 6) {
+                        Map<String, Object> mov = new HashMap<>();
 
-                    if (columnas.size() >= 6) {
-                        Map<String, Object> movimiento = new HashMap<>();
-
-                        // Fecha
-                        movimiento.put("fecha", getColumnText(columnas.get(0)));
-
-                        // Fecha Valuta
-                        movimiento.put("fecha_valor", getColumnText(columnas.get(1)));
-
-                        // Descripción
-                        movimiento.put("descripcion", getColumnText(columnas.get(2)));
-
-                        // Número de operación
-                        movimiento.put("operacion", getColumnText(columnas.get(3)));
-
-                        // Monto (puede ser positivo o negativo)
-                        String montoText = getColumnText(columnas.get(4));
+                        String fecha = getColumnText(columnas.nth(0));
+                        String fechaValor = getColumnText(columnas.nth(1));
+                        String descripcion = getColumnText(columnas.nth(2));
+                        String operacion = getColumnText(columnas.nth(3));
+                        String montoText = getColumnText(columnas.nth(4));
                         double monto = MetodsGeneric.parseSaldo(montoText);
-                        movimiento.put("monto", monto);
-
-                        // Determinar si es débito o crédito
-                        if (montoText.contains("-")) {
-                            movimiento.put("tipo", "DEBITO");
-                        } else {
-                            movimiento.put("tipo", "CREDITO");
-                        }
-
-                        // Saldo
-                        String saldoText = getColumnText(columnas.get(4));
+                        String saldoText = getColumnText(columnas.nth(4));
                         double saldo = MetodsGeneric.parseSaldo(saldoText);
-                        movimiento.put("saldo", saldo);
 
-                        //Referencia
-                        movimiento.put("referencia", "-");
+                        mov.put("fecha", fecha);
+                        mov.put("fecha_valor", fechaValor);
+                        mov.put("descripcion", descripcion);
+                        mov.put("operacion", operacion);
+                        mov.put("monto", monto);
+                        mov.put("tipo", montoText.contains("-") ? "DEBITO" : "CREDITO");
+                        mov.put("saldo", saldo);
+                        mov.put("referencia", "-");
 
-                        movimientos.add(movimiento);
+                        movimientos.add(mov);
                     }
                 } catch (Exception e) {
                     log.warn("Error procesando fila: {}", e.getMessage());
@@ -1370,19 +1043,16 @@ public class BcpMenuServiceImpl implements BcpMenuService {
     }
 
     /**
-     *
      * @param columna extrae el valor de la columna enviada como parametro
-     *
      * @return {@link String} valor de la columna
      */
-    private String getColumnText(WebElement columna) {
+    private String getColumnText(Locator columna) {
         try {
-            List<WebElement> paragraphs = columna.findElements(By.cssSelector("bcp-paragraph-bpbaaa"));
-            if (!paragraphs.isEmpty()) {
-                return paragraphs.get(0).getText().trim();
+            Locator paragraphs = columna.locator("bcp-paragraph-bpbaaa");
+            if (paragraphs.count() > 0) {
+                return paragraphs.first().innerText().trim();
             }
-
-            return columna.getText().trim();
+            return columna.innerText().trim();
         } catch (Exception e) {
             return "";
         }

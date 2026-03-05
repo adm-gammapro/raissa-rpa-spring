@@ -1,6 +1,6 @@
 package com.raissa.rpa.service.ibk;
 
-import org.openqa.selenium.WebDriver;
+import com.microsoft.playwright.Page;
 
 import java.util.List;
 import java.util.Map;
@@ -9,43 +9,109 @@ public interface IbkMenuService {
     /**
      * Verifica si el logueo fue exitoso
      *
-     * @param driver manejador de página
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    boolean verifyLoginSuccess(WebDriver driver);
+    boolean verifyLoginSuccess(Page page);
 
-    boolean closeCampaignPopupIfPresent(WebDriver driver);
+    /**
+     * @param page manejador de página
+     *
+     * @return {@link boolean}
+     */
+    boolean closeCampaignPopupIfPresent(Page page);
 
     /**
      * Hace clic en la opcion consultas saldos
-     * @param driver manejador de página
+     *
+     * @param page manejador de página
      * @return {@link boolean}
      */
-    boolean clickConsultas(WebDriver driver);
+    boolean clickConsultas(Page page);
 
-    void waitForAccountsToLoad(WebDriver driver);
+    /**
+     * Extrae los datos de las cuentas
+     *
+     * @param page manejador de pagina
+     * @return {@link List}
+     */
+    List<Map<String, Object>> extractAccountsData(Page page);
 
-    List<Map<String, Object>> extractAccountsData(WebDriver driver);
+    /**
+     * Hace clic en la opcion de movimientos
+     * @param page manejador de página
+     * @return {@link boolean}
+     */
+    boolean clickMovimientos(Page page);
 
-    boolean clickMovimientos(WebDriver driver);
+    /**
+     * Selecciona una cuenta para extraccion
+     *
+     * @param page manejador de pagina
+     * @param numeroCuenta numero de cuenta a extraer movimientos
+     * @return {@link boolean}
+     */
+    boolean selectCuenta(Page page, String numeroCuenta);
 
-    void waitForMovementsToLoad(WebDriver driver);
+    /**
+     * Carga las fechas en la busqueda
+     *
+     * @param page manejador de pagina
+     * @param fechaInicio valro de fecha inicial de busqueda
+     * @param fechaFin valor de fecha final de busqueda
+     * @return {@link boolean}
+     */
+    boolean setDateRange(Page page, String fechaInicio, String fechaFin);
 
-    boolean selectCuenta(WebDriver driver, String numeroCuenta);
+    /**
+     * Aplica los filtros de fechas cargados
+     *
+     * @param page maenjador de pagina
+     */
+    void applyFilters(Page page);
 
-    boolean setDateRange(WebDriver driver, String fechaInicio, String fechaFin);
+    /**
+     * Espera a que los movimientos hayan cargado en la pagina
+     *
+     * @param page manejador de pagina
+     * @return {@link boolean}
+     */
+    boolean waitForMovimientosToLoad(Page page);
 
-    void applyFilters(WebDriver driver);
+    /**
+     * Extrae los movimientos de la pagina
+     *
+     * @param page manejador de pagina
+     * @return {@link List}
+     */
+    List<Map<String, Object>> extractMovimientosData(Page page);
 
-    boolean waitForMovimientosToLoad(WebDriver driver);
+    /**
+     * Abre dropdow de perfil
+     *
+     * @param page manejador de pagina
+     */
+    void openProfileDropdown(Page page);
 
-    List<Map<String, Object>> extractMovimientosData(WebDriver driver);
+    /**
+     * Click en el boton de cerrar sesion
+     *
+     * @param page manejador de pagina
+     */
+    void clickLogoutButton(Page page);
 
-    void openProfileDropdown(WebDriver driver);
+    /**
+     * Hace click en cerrar sesion
+     *
+     * @param page manejador de pagina
+     */
+    void handleNpsSurvey(Page page);
 
-    void clickLogoutButton(WebDriver driver);
-
-    void handleNpsSurvey(WebDriver driver);
-
-    boolean verifyLogoutSuccess(WebDriver driver);
+    /**
+     * Verifica si se cerro la sesion
+     *
+     * @param page manejador de pagina
+     * @return {@link boolean}
+     */
+    boolean verifyLogoutSuccess(Page page);
 }
