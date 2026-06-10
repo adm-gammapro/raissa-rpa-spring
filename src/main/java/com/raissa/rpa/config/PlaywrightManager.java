@@ -64,7 +64,7 @@ public class PlaywrightManager {
 
     public Browser.NewContextOptions defaultContextOptions() {
         return new Browser.NewContextOptions()
-                .setViewportSize(isProduction ? 1920 : 1400, isProduction ? 1080 : 1000)
+                .setViewportSize(isProduction ? 1920 : 1680, isProduction ? 1080 : 1000)
                 .setUserAgent(isProduction ? uaProd : uaDev)
                 .setLocale("es-PE")
                 .setTimezoneId("America/Lima")

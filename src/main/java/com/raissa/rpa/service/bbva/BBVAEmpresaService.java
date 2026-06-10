@@ -34,17 +34,6 @@ public interface BBVAEmpresaService {
     Map<String, Object> obtenerMovimientos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin, boolean detalle);
 
     /**
-     * Obtiene datos de movimientos historicos de una cuenta específica
-     *
-     * @param transactionId id de transaccion
-     * @param numeroCuenta numero de cuenta
-     * @param fechaInicio fecha de inicio para busqueda
-     * @param fechaFin fecha de fin para busqueda
-     * @return {@link Map} Datos de movimientos de cuenta
-     */
-    Map<String, Object> obtenerMovimientosHistoricos(String transactionId, String numeroCuenta, String fechaInicio, String fechaFin);
-
-    /**
      * Cierra sesion a la pagian del bbva
      *
      * @param transactionId id de transaccion

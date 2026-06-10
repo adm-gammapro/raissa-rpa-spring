@@ -1,5 +1,6 @@
 package com.raissa.rpa.util;
 
+import com.microsoft.playwright.Keyboard;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.WaitForSelectorState;
@@ -51,6 +52,18 @@ public abstract class MetodsGeneric {
                 Thread.currentThread().interrupt();
                 throw new ValidationException("Interrumpido mientras se tipeaba", ie);
             }
+        }
+    }
+
+    /**
+     * Simula escritura humana con delays entre teclas no especifico en objeto, sino sobre la pagina
+     */
+    public static void humanTypeWithKeyboard(Page page, String text, int minDelayMs, int maxDelayMs) {
+        if (text == null) return;
+        for (char c : text.toCharArray()) {
+            page.keyboard().type(String.valueOf(c), new Keyboard.TypeOptions()
+                    .setDelay(ThreadLocalRandom.current().nextInt(minDelayMs, maxDelayMs + 1)));
+            MetodsGeneric.randomWaitPage(page, 60, 120);
         }
     }
 

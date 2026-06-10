@@ -1,5 +1,7 @@
 package com.raissa.rpa.service.bbva;
 
+import com.microsoft.playwright.Page;
+
 import java.util.List;
 import java.util.Map;
 
@@ -7,101 +9,81 @@ public interface BbvaMenuService {
     /**
      * Verifica si el menu esta visible
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link boolean}
      */
-    //boolean isMenuVisible(WebDriver driver);
+    boolean isMenuVisible(Page page);
 
     /**
      * Hace clic en el menu de posicion global
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link boolean}
      */
-    //boolean clickCuentas(WebDriver driver);
+    boolean clickCuentas(Page page);
 
     /**
      * Clic en posicion general online
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link boolean}
      */
-    //boolean clickPosicionGlobalOnline(WebDriver driver);
+    boolean clickAllCuentas(Page page);
 
     /**
      * Extraccion de saldos
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link Map} datos de saldos
      */
-    //Map<String, Object> extractAccounts(WebDriver driver);
-
-    /**
-     * Clic en movimientos
-     *
-     * @param driver Manejador de pagina
-     * @return {@link boolean}
-     */
-    //boolean clickMovimientos(WebDriver driver);
+    Map<String, Object> extractAccounts(Page page);
 
     /**
      * Realiza la bsuqueda por movimientos
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @param numeroCuenta Numeor de cuenta
      * @param fechaDesde fecha de inicio para busqueda
      * @param fechaHasta fecha de inicio para busqueda
      */
-    //void busquedaMovimientos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
+    void busquedaMovimientos(Page page, String numeroCuenta, String fechaDesde, String fechaHasta);
 
     /**
      * Extrae movimientos de la página
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link List<Map>}
      */
-    //List<Map<String, Object>> extraerMovimientos(WebDriver driver);
+    List<Map<String, Object>> extraerMovimientos(Page page);
 
     /**
      * Extrae el detalle de los movimientos de la lista
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @param listMovements listado de movimientos
      * @return {@link List<Map>} Listado de movimientos actualizado
      */
-    //List<Map<String, Object>> extraerDetalleMovimientos(WebDriver driver, List<Map<String, Object>> listMovements);
-
-    /**
-     * Clic en movimientos historicos
-     *
-     * @param driver Manejador de pagina
-     * @return {@link boolean}
-     */
-    //boolean clickMovimientosHistoricos(WebDriver driver);
-
-    /**
-     * Realiza la busqueda por movimientos historico
-     *
-     * @param driver Manejador de pagina
-     * @param numeroCuenta Número de cuenta
-     * @param fechaDesde fecha de inicio para busqueda
-     * @param fechaHasta fecha de inicio para busqueda
-     */
-    //void busquedaMovimientosHistoricos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta);
-
-    /**
-     * Extrae movimientos historicos de la página
-     *
-     * @param driver Manejador de pagina
-     * @return {@link List<Map>}
-     */
-    //List<Map<String, Object>> extraerMovimientosHistoricos(WebDriver driver);
+    List<Map<String, Object>> extraerDetalleMovimientos(Page page, List<Map<String, Object>> listMovements);
 
     /**
      * Hace clic en el boton salir
      *
-     * @param driver Manejador de pagina
+     * @param page Manejador de pagina
      * @return {@link boolean}
      */
-    //boolean clickSalir(WebDriver driver);
+    boolean clickSalir(Page page);
+
+    /**
+     * Clic al modal que cierra sesion
+     * @param page manejador de pagina
+     * @return {@link boolean}
+     */
+    boolean clickCerrarSesionModal(Page page);
+
+    /**
+     * Verifica si hay un modal y lo cierra
+     *
+     * @param page manejador de página
+     */
+    void closeModalIfPresent(Page page);
 }

@@ -1,449 +1,851 @@
 package com.raissa.rpa.service.impl.bbva;
 
+import com.microsoft.playwright.ElementHandle;
+import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.options.AriaRole;
+import com.microsoft.playwright.options.BoundingBox;
+import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.WaitForSelectorState;
+import com.raissa.rpa.exception.BbvaException;
 import com.raissa.rpa.service.bbva.BbvaMenuService;
 import com.raissa.rpa.util.Constantes;
-import com.raissa.rpa.util.DateUtils;
 import com.raissa.rpa.util.MetodsGeneric;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 @Service
 @Slf4j
 public class BbvaMenuServiceimpl implements BbvaMenuService {
-    /*public boolean isMenuVisible(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
+    public boolean isMenuVisible(Page page) {
+        int timeoutMs = 5_000;
         try {
-            WebElement appHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
+            MetodsGeneric.randomWait(2000, 3000);
+            Locator app =MetodsGeneric.waitForVisible(page, "bbva-btge-app-template#app__content", timeoutMs);
 
-            WebElement navMenu = appHost.findElement(By.cssSelector("bbva-btge-sidebar-menu.sidebar[slot='nav']"));
+            Locator nav = app.locator("bbva-btge-sidebar-menu.sidebar[slot='nav']").first();
+            nav.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.ATTACHED)
+                    .setTimeout(timeoutMs));
 
-            SearchContext s1 = navMenu.getShadowRoot();
+            ElementHandle navEl = nav.elementHandle();
+            if (navEl == null) return false;
 
-            WebElement container;
-            try {
-                container = s1.findElement(By.cssSelector("div.container"));
-            } catch (NoSuchElementException e) {
-                container = navMenu.findElement(By.cssSelector("div.container"));
-            }
+            ElementHandle containerEl = page.evaluateHandle(
+                    "(navMenu) => {" +
+                            "  if (!navMenu || !navMenu.shadowRoot) return null;" +
+                            "  const sr = navMenu.shadowRoot;" +
+                            "  if (!sr) return null;" +
+                            "  return sr.querySelector('div.container');" +
+                            "}",
+                    navEl
+            ).asElement();
+            if (containerEl == null) return false;
 
-            WebElement sidebar = container.findElement(By.cssSelector("bbva-web-navigation-menu[role='navigation'][aria-label='Main menu']"));
+            ElementHandle menuEl = page.evaluateHandle(
+                    "(container) => {" +
+                            "  if (!container) return null;" +
+                            "  return container.querySelector(\"bbva-web-navigation-menu[role='navigation'][aria-label='Main menu']\");" +
+                            "}",
+                    containerEl
+            ).asElement();
+            if (menuEl == null) return false;
 
-            WebElement navMenuItem = sidebar.findElement(By.cssSelector("bbva-web-navigation-menu-item[event-name='event-111V00001']"));
+            ElementHandle itemInicioEl = page.evaluateHandle(
+                    "(menu) => {" +
+                            "  if (!menu) return null;" +
+                            "  return menu.querySelector(\"bbva-web-navigation-menu-item[event-name='event-111V00001']\");" +
+                            "}",
+                    menuEl
+            ).asElement();
+            if (itemInicioEl == null) return false;
 
-            WebElement span = navMenuItem.findElement(By.cssSelector("span"));
-            String text = span.getText().replace('\u00A0',' ').trim();
-            return "Inicio".equals(text);
-        } catch (TimeoutException | NoSuchElementException e) {
+            ElementHandle actionSelectedEl = page.evaluateHandle(
+                    "(item) => {" +
+                            "  if (!item || !item.shadowRoot) return null;" +
+                            "  return item.shadowRoot.querySelector('bbva-web-navigation-menu-item-action[selected]');" +
+                            "}",
+                    itemInicioEl
+            ).asElement();
+            return actionSelectedEl != null;
+        } catch (Exception e) {
+            log.error("Error al tratar de ubicar el menu como validacion de ingreso");
             return false;
         }
     }
 
-    public boolean clickCuentas(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+    public boolean clickCuentas(Page page) {
+        int timeoutMs = 5_000;
 
         try {
-            WebElement appHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
+            MetodsGeneric.waitForAttached(page, "bbva-btge-app-template#app__content", timeoutMs);
 
-            WebElement navMenu = appHost.findElement(By.cssSelector("bbva-btge-sidebar-menu.sidebar[slot='nav']"));
+            ElementHandle buttonCuentas = page.evaluateHandle(
+                    "() => {" +
+                            "const appHost = document.querySelector('bbva-btge-app-template#app__content');" +
 
-            SearchContext s1 = navMenu.getShadowRoot();
+                            "const navMenu = appHost.querySelector(\"bbva-btge-sidebar-menu.sidebar[slot='nav']\");" +
+                            "if (!navMenu || !navMenu.shadowRoot) return null;" +
 
-            WebElement container;
+                            "const container = navMenu.shadowRoot.querySelector('div.container');" +
+                            "if (!container) return null;" +
+
+                            "const sidebar = container.querySelector(\"bbva-web-navigation-menu[role='navigation'][aria-label='Main menu']\");" +
+
+                            "const navMenuItem = sidebar.querySelector(\"bbva-web-navigation-menu-item[event-name='event-111V00002']\");" +
+                            "if (!navMenuItem || !navMenuItem.shadowRoot) return null;" +
+
+                            "return navMenuItem.shadowRoot.querySelector(\"bbva-web-navigation-menu-item-action[role='button']\");" +
+                            "}"
+            ).asElement();
+
+            if (buttonCuentas == null) return false;
+
             try {
-                container = s1.findElement(By.cssSelector("div.container"));
-            } catch (NoSuchElementException e) {
-                container = navMenu.findElement(By.cssSelector("div.container"));
-            }
-
-            WebElement sidebar = container.findElement(By.cssSelector("bbva-web-navigation-menu[role='navigation'][aria-label='Main menu']"));
-
-            WebElement navMenuItem = sidebar.findElement(By.cssSelector("bbva-web-navigation-menu-item[event-name='event-111V00002']"));
-
-            SearchContext s2 = navMenuItem.getShadowRoot();
-
-            WebElement buttonCuentas = s2.findElement(By.cssSelector("bbva-web-navigation-menu-item-action[role='button']"));
-
-            wait.until(ExpectedConditions.visibilityOf(buttonCuentas));
-            try {
-                wait.until(ExpectedConditions.elementToBeClickable(buttonCuentas)).click();
+                buttonCuentas.click(new ElementHandle.ClickOptions().setTimeout(timeoutMs));
                 return true;
-            } catch (ElementNotInteractableException e) {
-                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", buttonCuentas);
-                return false;
+            } catch (Exception e) {
+                page.evaluate("(el) => el.click()", buttonCuentas);
+                return true;
             }
-        } catch (TimeoutException | NoSuchElementException e) {
+        } catch (Exception e) {
+            log.error("Error al tratar de hacer click en cuentas");
             return false;
         }
     }
 
-    public boolean clickPosicionGlobalOnline(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+    public boolean clickAllCuentas(Page page) {
+        ElementHandle iframeEl = null;
 
         try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
+            try {
+                MetodsGeneric.randomWait(4_000, 5_000);
+            } catch (Exception e) {
+                log.error("Error al esperar para cerrar modal");
+            }
 
-            WebElement landing = body.findElement(By.cssSelector(
-                    "bbva-btge-menurization-landing-solution-page#cells-template-bbva-btge-menurization-landing-solution"
-            ));
-            SearchContext s1 = landing.getShadowRoot();
+            closeModalIfPresent(page);
 
-            WebElement navMenu = s1.findElement(By.cssSelector(
-                    "cells-template-paper-drawer-panel.state-is-visible[state='active']"
-            ));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
+            iframeEl = page.evaluateHandle(
+                    "() => {" +
+                            "const body = document.querySelector('bbva-btge-app-template#app__content');" +
+                            "const landing = body.querySelector(" +
+                            "'bbva-btge-accounts-solution-page#cells-template-bbva-btge-accounts-solution'" +
+                            ");" +
+                            "if (!landing || !landing.shadowRoot) return null;" +
 
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.microfrontend-iframe")
+                            "const panel = landing.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return null;" +
+
+                            "const appMain = panel.querySelector(\"div[slot='app__main'].container\");" +
+                            "if (!appMain) return null;" +
+
+                            "const iframeHost = appMain.querySelector(\"bbva-core-iframe[iframe-title='bbva-btge-accounts-solution']\");" +
+                            "if (!iframeHost || !iframeHost.shadowRoot) return null;" +
+
+                            "const iframeContainer = iframeHost.shadowRoot.querySelector('div#iframeContainer.iframe-container');" +
+                            "if (!iframeContainer) return null;" +
+
+                            "return iframeContainer.querySelector('iframe#bbvaIframe');" +
+                            "}"
+            ).asElement();
+
+            if (iframeEl == null) return false;
+
+            Frame iframe = iframeEl.contentFrame();
+            if (iframe == null) return false;
+
+            // Dentro del iframe, navegar shadow roots y click en "boton lista"
+            iframe.evaluate(
+                    "() => {" +
+                            "const homeHost = document.querySelector(" +
+                            "'bbva-btge-accounts-solution-home-page#cells-template-bbva-btge-accounts-solution-home'" +
+                            ");" +
+                            "if (!homeHost || !homeHost.shadowRoot) return;" +
+
+                            "const panel = homeHost.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return;" +
+
+                            "const appMain = panel.querySelector(\"div[slot='app__main']\");" +
+                            "if (!appMain) return;" +
+
+                            "const mainContainer = appMain.querySelector('div.main-content');" +
+                            "if (!mainContainer) return;" +
+
+                            "const wrapper = mainContainer.querySelector('div.page-wrapper');" +
+                            "if (!wrapper) return;" +
+
+                            "const layout = wrapper.querySelector('bbva-foundations-grid-tools-layout.zone');" +
+                            "if (!layout) return;" +
+
+                            "const fewAccounts = layout.querySelector(\"div.o-few-accounts[slot='mainLayout']\");" +
+                            "if (!fewAccounts) return;" +
+
+                            "const fewAccountsHeader = fewAccounts.querySelector('div.o-few-accounts__header.o-few-accounts__header--spacing');" +
+                            "if (!fewAccountsHeader) return;" +
+
+                            "const buttonGroup = fewAccountsHeader.querySelector('bbva-button-group.o-few-accounts__button-group');" +
+                            "if (!buttonGroup || !buttonGroup.shadowRoot) return;" +
+
+                            "const listItem = buttonGroup.shadowRoot " +
+                            "  ? buttonGroup.shadowRoot.querySelector(\"bbva-button-group-item[value='ListView']\") " +
+                            "  : buttonGroup.querySelector(\"bbva-button-group-item[value='ListView']\");" +
+                            "if (!listItem) return;" +
+
+                            "try { listItem.click(); } catch (e) {}" +
+                            "if (listItem.shadowRoot) {" +
+                            "  const inner = listItem.shadowRoot.querySelector(\"div.wrapper, [role='radio'], button, .item\");" +
+                            "  if (inner) { try { inner.click(); } catch (e) {} }" +
+                            "}" +
+                            "}"
             );
 
-            SearchContext s2 = iframeHost.getShadowRoot();
+            MetodsGeneric.randomWait(1_000, 1_500);
 
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-            driver.switchTo().frame(iframe);
-            try {
-                WebElement homeHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("bbva-btge-menurization-landing-solution-home-page#cells-template-bbva-btge-menurization-landing-solution-home")
-                ));
-                SearchContext s4 = homeHost.getShadowRoot();
+            // Dentro del iframe, navegar shadow roots y click en la primera cuenta que encuentre
+            iframe.evaluate(
+                    "() => {" +
+                            "const homeHost = document.querySelector(" +
+                            "'bbva-btge-accounts-solution-home-page#cells-template-bbva-btge-accounts-solution-home'" +
+                            ");" +
+                            "if (!homeHost || !homeHost.shadowRoot) return;" +
 
-                WebElement mainContainer = s4.findElement(By.cssSelector("div[slot='app__main'].main-container"));
-                WebElement wrapper = mainContainer.findElement(By.cssSelector("div.wrapper"));
-                WebElement layout = wrapper.findElement(By.cssSelector("bbva-foundations-grid-default-layout.content-layout.container-cards"));
-                WebElement leftCol = layout.findElement(By.cssSelector("div.column[slot='left']"));
-                WebElement sectionCard = leftCol.findElement(By.cssSelector("div.section-card"));
-                WebElement contentLevel = sectionCard.findElement(By.cssSelector("div.content-level"));
+                            "const panel = homeHost.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return;" +
 
-                WebElement link = contentLevel.findElement(
-                        By.xpath(".//bbva-web-link[@class='link-level' and @role='button'][normalize-space(.)='Posición global online']")
-                );
+                            "const appMain = panel.querySelector(\"div[slot='app__main']\");" +
+                            "if (!appMain) return;" +
 
-                wait.until(ExpectedConditions.visibilityOf(link));
-                try {
-                    wait.until(ExpectedConditions.elementToBeClickable(link)).click();
-                } catch (ElementNotInteractableException e) {
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", link);
-                }
-            } finally {
-                driver.switchTo().defaultContent();
-            }
+                            "const mainContainer = appMain.querySelector('div.main-content');" +
+                            "if (!mainContainer) return;" +
+
+                            "const wrapper = mainContainer.querySelector('div.page-wrapper');" +
+                            "if (!wrapper) return;" +
+
+                            "const layout = wrapper.querySelector('bbva-foundations-grid-tools-layout.zone');" +
+                            "if (!layout) return;" +
+
+                            "const fewAccounts = layout.querySelector(\"div.o-few-accounts[slot='mainLayout']\");" +
+                            "if (!fewAccounts) return;" +
+
+                            "const accordions = Array.from(fewAccounts.querySelectorAll('bbva-expandable-accordion.entity-accordion'));" +
+                            "if (!accordions.length) return;" +
+
+                            "for (const accordion of accordions) {" +
+                            "  const content = accordion.querySelector(\"div.expandable-content[slot='content']\");" +
+                            "  if (!content) continue;" +
+
+                            "  const tableHost = content.querySelector('bbva-btge-accounts-solution-table.accountsTable');" +
+                            "  if (!tableHost) continue;" +
+
+                            "  if (!tableHost.shadowRoot) continue;" +
+                            "  const table = tableHost.shadowRoot.querySelector('table');" +
+                            "  if (!table) continue;" +
+
+                            "  const row = table.querySelector('tr.row');" +
+                            "  if (!row) continue;" +
+                            "  const cell = row.querySelector('td.cellText');" +
+                            "  if (!cell) continue;" +
+
+                            "  const bodyTextHost = cell.querySelector('bbva-table-body-text.accountDescription');" +
+                            "  if (!bodyTextHost || !bodyTextHost.shadowRoot) continue;" +
+
+                            "  const link = bodyTextHost.shadowRoot.querySelector('bbva-type-link.link[tabindex=\"0\"]');" +
+                            "  if (!link) continue;" +
+
+                            "  try { link.click(); } catch(e) {}" +
+                            "  return;" +
+                            "}" +
+                            "}"
+            );
+
             return true;
-        } catch (TimeoutException | NoSuchElementException e) {
-            try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
+        } catch (Exception e) {
             return false;
         }
     }
 
-    public Map<String, Object> extractAccounts(WebDriver driver) {
+    public Map<String, Object> extractAccounts(Page page) {
         Map<String, Object> result = new HashMap<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+        int timeoutMs = 5_000;
 
         try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-            WebElement landing = body.findElement(By.cssSelector("legacy-page#cells-template-legacy"));
-            SearchContext s1 = landing.getShadowRoot();
+            MetodsGeneric.randomWait(3_000, 4_000);
+            MetodsGeneric.waitForAttached(page, "bbva-btge-app-template#app__content", timeoutMs);
 
-            WebElement navMenu = s1.findElement(By.cssSelector("cells-template-paper-drawer-panel.state-is-visible[state='active']"));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.legacy-microfrontend")
+            ElementHandle iframeEl = page.evaluateHandle(
+                    "() => {" +
+                            "const body = document.querySelector('bbva-btge-app-template#app__content');" +
+                            "const landing = body.querySelector(" +
+                            "'bbva-btge-accounts-solution-page#cells-template-bbva-btge-accounts-solution'" +
+                            ");" +
+                            "if (!landing || !landing.shadowRoot) return null;" +
+
+                            "const panel = landing.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return null;" +
+
+                            "const appMain = panel.querySelector(\"div[slot='app__main'].container\");" +
+                            "if (!appMain) return null;" +
+
+                            "const iframeHost = appMain.querySelector(\"bbva-core-iframe[iframe-title='bbva-btge-accounts-solution']\");" +
+                            "if (!iframeHost || !iframeHost.shadowRoot) return null;" +
+
+                            "const iframeContainer = iframeHost.shadowRoot.querySelector('div#iframeContainer.iframe-container');" +
+                            "if (!iframeContainer) return null;" +
+
+                            "return iframeContainer.querySelector('iframe#bbvaIframe');" +
+                            "}"
+            ).asElement();
+
+            if (iframeEl == null) {
+                throw new BbvaException("No se encontró iframe#bbvaIframe (legacy)");
+            }
+
+            Frame iframe = iframeEl.contentFrame();
+            if (iframe == null) {
+                throw new BbvaException("No se pudo obtener contentFrame() de iframe#bbvaIframe");
+            }
+
+            // ========= 1) EXTRAER LISTA DE CUENTAS =========
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> cuentas = (List<Map<String, Object>>) iframe.evaluate(
+                    "() => {" +
+                            "const out = [];" +
+                            "const clean = s => (s || '').replace(/\\D/g, '');" +
+
+                            "const app = document.querySelector('div#app__content');" +
+                            "if (!app) return out;" +
+                            "const mov = app.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                            "if (!mov || !mov.shadowRoot) return out;" +
+                            "const panel = mov.shadowRoot.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                            "if (!panel) return out;" +
+                            "const wrapper = panel.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                            "if (!wrapper) return out;" +
+                            "const header = wrapper.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                            "if (!header) return out;" +
+
+                            "const selectSlot = header.querySelector('div[slot=\"selectFilterProductSlot\"]');" +
+                            "if (!selectSlot) return out;" +
+                            "const selectHost = selectSlot.querySelector('bbva-form-select-filter');" +
+                            "if (!selectHost) return out;" +
+
+                            // IMPORTANTE: primero light DOM (ahí están tus options reales)
+                            "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            // fallback shadow solo si light no trajo nada útil
+                            "if (!opts.length && selectHost.shadowRoot) {" +
+                            "  opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            "}" +
+
+                            "opts.forEach((o, idx) => {" +
+                            "  const v = o.getAttribute('value');" +
+                            "  const a = o.getAttribute('aria-label');" +
+                            "  const t = (o.textContent || '').trim();" +
+                            "  const raw = v || a || t;" +
+                            "  const numero = clean(raw);" +
+                            "  if (!numero) return;" + // evita wrappers vacíos
+                            "  out.push({" +
+                            "    index: idx," +
+                            "    numeroCuenta: numero," +
+                            "    selected: o.hasAttribute('selected') || o.getAttribute('aria-selected') === 'true'" +
+                            "  });" +
+                            "});" +
+
+                            "return out;" +
+                            "}"
             );
-            SearchContext s2 = iframeHost.getShadowRoot();
 
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
+            if (cuentas == null || cuentas.isEmpty()) {
+                throw new BbvaException("No se encontraron cuentas en el selector");
+            }
 
-            driver.switchTo().frame(iframe);
+            Supplier<Map<String, Object>> leerSaldosActuales = () -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> bal = (Map<String, Object>) iframe.evaluate(
+                        "() => {" +
+                                "const toCurrency = (v) => {" +
+                                "  const c = (v || '').trim();" +
+                                "  if (c === 'S/' || c.toUpperCase() === 'PEN') return 'PEN';" +
+                                "  if (c === '$' || c.toUpperCase() === 'USD') return 'USD';" +
+                                "  return c;" +
+                                "};" +
+                                "let saldoDisp = 0, saldoCont = 0, moneda = '';" +
 
-            try {
-                WebElement containerBody = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("div#kyop-container-body")
-                ));
-                WebElement kyopBody = containerBody.findElement(By.cssSelector("div#kyop-body"));
-                WebElement kyopBodyTable = kyopBody.findElement(By.cssSelector("table#kyop-boby-table"));
-                WebElement td = kyopBodyTable.findElement(By.cssSelector("tbody tr td#kyop-body-table-td"));
-                WebElement kyopIframeContainer = td.findElement(By.cssSelector("div#kyop-central-load-area-container"));
-                WebElement iframeKyopCentral = kyopIframeContainer.findElement(By.cssSelector("iframe#kyop-central-load-area"));
+                                "const app = document.querySelector('div#app__content');" +
+                                "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                                "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                                "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                                "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                                "const mainData = header?.querySelector('div[slot=\"mainDataSlot\"]');" +
+                                "if (!mainData) return { saldoDisp, saldoCont, moneda };" +
 
-                wait.until(ExpectedConditions.frameToBeAvailableAndSwitchToIt(iframeKyopCentral));
+                                "const lis = Array.from(mainData.querySelectorAll('ul.c-header-product__amounts > li'));" +
+                                "for (const li of lis) {" +
+                                "  const simple = li.querySelector('bbva-btge-list-simple');" +
+                                "  if (!simple) continue;" +
+                                "  const sr = simple.shadowRoot || simple;" +
+                                "  const titleEl = sr.querySelector('bbva-type-text[data-test-id=\"container-header-main-title\"]');" +
+                                "  const amountEl = sr.querySelector('bbva-type-amount[data-test-id=\"container-header-right\"]');" +
+                                "  if (!titleEl || !amountEl) continue;" +
 
-                try {
-                    WebElement contenedorSeccion = wait.until(
-                            ExpectedConditions.presenceOfElementLocated(
-                                    By.cssSelector("div.contenedor-seccion")
-                            )
+                                "  const title = ((titleEl.getAttribute('text') || titleEl.textContent || '').trim()).toLowerCase();" +
+                                "  const amount = parseFloat(amountEl.getAttribute('amount') || '0');" +
+                                "  const curRaw = amountEl.getAttribute('currency-code') || amountEl.getAttribute('symbol') || '';" +
+                                "  if (!moneda) moneda = toCurrency(curRaw);" +
+                                "  if (title.includes('disponible')) saldoDisp = isNaN(amount) ? 0 : amount;" +
+                                "  if (title.includes('contable')) saldoCont = isNaN(amount) ? 0 : amount;" +
+                                "}" +
+                                "return { saldoDisp, saldoCont, moneda };" +
+                                "}"
+                );
+                return bal;
+            };
+
+            Consumer<Integer> seleccionarCuenta = (idx) -> {
+                iframe.evaluate(
+                        "(targetIdx) => {" +
+                                "const app = document.querySelector('div#app__content');" +
+                                "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                                "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                                "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                                "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                                "const selectHost = header?.querySelector('div[slot=\"selectFilterProductSlot\"] bbva-form-select-filter');" +
+                                "if (!selectHost) return false;" +
+
+                                "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                "if (!opts.length && selectHost.shadowRoot) {" +
+                                "  opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                "}" +
+                                "const target = opts[targetIdx];" +
+                                "if (!target) return false;" +
+
+                                "opts.forEach(o => {" +
+                                "  o.removeAttribute('selected');" +
+                                "  o.setAttribute('aria-selected','false');" +
+                                "  if ((o.getAttribute('ambient') || '').toLowerCase() === 'secondary') o.removeAttribute('ambient');" +
+                                "});" +
+
+                                "target.setAttribute('selected','');" +
+                                "target.setAttribute('aria-selected','true');" +
+                                "target.setAttribute('ambient','secondary');" +
+
+                                "const newValue = target.getAttribute('value') || '';" +
+                                "if (newValue) {" +
+                                "  try { selectHost.value = newValue; } catch(e) {}" +
+                                "  selectHost.setAttribute('value', newValue);" +
+                                "}" +
+
+                                "try { target.click(); } catch(e) {}" +
+                                "selectHost.dispatchEvent(new Event('input', { bubbles:true, composed:true }));" +
+                                "selectHost.dispatchEvent(new Event('change', { bubbles:true, composed:true }));" +
+                                "selectHost.dispatchEvent(new CustomEvent('value-changed', { bubbles:true, composed:true, detail:{ value:newValue } }));" +
+                                "return true;" +
+                                "}",
+                        idx
+                );
+            };
+
+            // ========= 2) ORDENAR: seleccionada primero =========
+            List<Map<String, Object>> ordered = new ArrayList<>();
+            Map<String, Object> selected = cuentas.stream()
+                    .filter(c -> Boolean.TRUE.equals(c.get("selected")))
+                    .findFirst()
+                    .orElse(cuentas.get(0));
+
+            ordered.add(selected);
+            for (Map<String, Object> c : cuentas) {
+                if (c != selected) ordered.add(c);
+            }
+
+            // ========= 3) ITERAR Y EXTRAER =========
+            List<Map<String, Object>> data = new ArrayList<>();
+
+            for (int i = 0; i < ordered.size(); i++) {
+                Map<String, Object> cta = ordered.get(i);
+                Integer idx = ((Number) cta.get("index")).intValue();
+
+                if (i > 0) {
+                    String before = (String) iframe.evaluate(
+                            "() => {" +
+                                    "const app = document.querySelector('div#app__content');" +
+                                    "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                                    "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                                    "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                                    "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                                    "const selectHost = header?.querySelector('div[slot=\"selectFilterProductSlot\"] bbva-form-select-filter');" +
+                                    "if (!selectHost) return '';" +
+                                    "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                    "if (!opts.length && selectHost.shadowRoot) opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                    "const cur = opts.find(o => o.hasAttribute('selected') || o.getAttribute('aria-selected')==='true');" +
+                                    "return cur ? (cur.getAttribute('value') || '') : '';" +
+                                    "}"
                     );
 
-                    return mapearContenedorSeccion(contenedorSeccion);
-                } finally {
-                    driver.switchTo().defaultContent();
+                    seleccionarCuenta.accept(idx);
+
+                    iframe.waitForFunction(
+                            "(prev) => {" +
+                                    "const app = document.querySelector('div#app__content');" +
+                                    "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                                    "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                                    "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                                    "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                                    "const selectHost = header?.querySelector('div[slot=\"selectFilterProductSlot\"] bbva-form-select-filter');" +
+                                    "if (!selectHost) return false;" +
+                                    "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                    "if (!opts.length && selectHost.shadowRoot) opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                                    "const cur = opts.find(o => o.hasAttribute('selected') || o.getAttribute('aria-selected')==='true');" +
+                                    "const now = cur ? (cur.getAttribute('value') || '') : '';" +
+                                    "return now && now !== prev;" +
+                                    "}",
+                            before,
+                            new Frame.WaitForFunctionOptions().setTimeout(4_000)
+                    );
                 }
-            } catch (Exception innerException) {
-                driver.switchTo().defaultContent();
-                throw innerException;
-            }
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
-            try {
-                driver.switchTo().defaultContent();
-            } catch (Exception ignore) {
-                log.error("Ya se encuentra en el default context de driver manager");
+
+                Map<String, Object> bal = leerSaldosActuales.get();
+
+                Map<String, Object> fila = new HashMap<>();
+                fila.put(Constantes.KEY_NUMERO_CUENTA, cta.get("numeroCuenta"));
+                fila.put(Constantes.KEY_TIPO_CUENTA, "");
+                fila.put(Constantes.KEY_SALDO_CONT, bal.get("saldoCont"));
+                fila.put(Constantes.KEY_SALDO_DISP, bal.get("saldoDisp"));
+                fila.put(Constantes.KEY_MONEDA, bal.get("moneda"));
+
+                data.add(fila);
             }
 
+            result.put("data", data);
+            result.put("count", data.size());
+            result.put(Constantes.KEY_SUCCESS, true);
+            result.put(Constantes.KEY_MESSAGE, "Cuentas extraídas correctamente");
+            return result;
+        } catch (BbvaException e) {
+            log.error("Error controlado al mapear contenido del iframe: {}", e.getMessage());
+            result.put(Constantes.KEY_SUCCESS, false);
+            result.put(Constantes.KEY_MESSAGE, e.getMessage());
+            return result;
+        } catch (Exception e) {
+            log.error("Error no controlado al mapear contenido del iframe: {}", e.getMessage());
             result.put(Constantes.KEY_SUCCESS, false);
             result.put(Constantes.KEY_MESSAGE, e.getMessage());
             return result;
         }
     }
 
-    public boolean clickMovimientos(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+    public void busquedaMovimientos(Page page, String numeroCuenta, String fechaDesde, String fechaHasta) {
+        int timeoutMs = 5_000;
 
         try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
+            MetodsGeneric.randomWait(3_000, 4_000);
+            MetodsGeneric.waitForAttached(page, "bbva-btge-app-template#app__content", timeoutMs);
 
-            WebElement landing = body.findElement(By.cssSelector(
-                    "bbva-btge-menurization-landing-solution-page#cells-template-bbva-btge-menurization-landing-solution"
-            ));
-            SearchContext s1 = landing.getShadowRoot();
+            ElementHandle iframeEl = page.evaluateHandle(
+                    "() => {" +
+                            "const body = document.querySelector('bbva-btge-app-template#app__content');" +
+                            "const landing = body.querySelector(" +
+                            "'bbva-btge-accounts-solution-page#cells-template-bbva-btge-accounts-solution'" +
+                            ");" +
+                            "if (!landing || !landing.shadowRoot) return null;" +
 
-            WebElement navMenu = s1.findElement(By.cssSelector(
-                    "cells-template-paper-drawer-panel.state-is-visible[state='active']"
-            ));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
+                            "const panel = landing.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return null;" +
 
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.microfrontend-iframe")
+                            "const appMain = panel.querySelector(\"div[slot='app__main'].container\");" +
+                            "if (!appMain) return null;" +
+
+                            "const iframeHost = appMain.querySelector(\"bbva-core-iframe[iframe-title='bbva-btge-accounts-solution']\");" +
+                            "if (!iframeHost || !iframeHost.shadowRoot) return null;" +
+
+                            "const iframeContainer = iframeHost.shadowRoot.querySelector('div#iframeContainer.iframe-container');" +
+                            "if (!iframeContainer) return null;" +
+
+                            "return iframeContainer.querySelector('iframe#bbvaIframe');" +
+                            "}"
+            ).asElement();
+
+            if (iframeEl == null) {
+                throw new BbvaException("No se encontró iframe#bbvaIframe (legacy)");
+            }
+
+            Frame iframe = iframeEl.contentFrame();
+            if (iframe == null) {
+                throw new BbvaException("No se pudo obtener contentFrame() de iframe#bbvaIframe");
+            }
+
+            // 1) Esperar wrapper de movimientos/filtros
+            iframe.waitForFunction(
+                    "() => {" +
+                            "const app = document.querySelector('div#app__content');" +
+                            "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                            "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                            "const wrap = panel?.querySelector('bbva-btge-transactions-table-wrapper#accountTransactionsWrapper');" +
+                            "return !!wrap;" +
+                            "}",
+                    null,
+                    new Frame.WaitForFunctionOptions().setTimeout(timeoutMs)
             );
 
-            SearchContext s2 = iframeHost.getShadowRoot();
+            final String cuentaTarget = (numeroCuenta == null) ? "" : numeroCuenta.replaceAll("\\D", "");
 
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-            driver.switchTo().frame(iframe);
-            try {
-                WebElement homeHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("bbva-btge-menurization-landing-solution-home-page#cells-template-bbva-btge-menurization-landing-solution-home")
-                ));
-                SearchContext s4 = homeHost.getShadowRoot();
-
-                WebElement mainContainer = s4.findElement(By.cssSelector("div[slot='app__main'].main-container"));
-                WebElement wrapper = mainContainer.findElement(By.cssSelector("div.wrapper"));
-                WebElement layout = wrapper.findElement(By.cssSelector("bbva-foundations-grid-default-layout.content-layout.container-cards"));
-                WebElement leftCol = layout.findElement(By.cssSelector("div.column[slot='right']"));
-                WebElement sectionCard = leftCol.findElement(By.cssSelector("div.section-card"));
-                WebElement contentLevel = sectionCard.findElement(By.cssSelector("div.content-level"));
-
-                WebElement link = contentLevel.findElement(
-                        By.xpath(".//bbva-web-link[@class='link-level' and @role='button'][normalize-space(.)='Movimientos']")
-                );
-
-                wait.until(ExpectedConditions.visibilityOf(link));
-                try {
-                    wait.until(ExpectedConditions.elementToBeClickable(link)).click();
-                } catch (ElementNotInteractableException e) {
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", link);
-                }
-            } finally {
-                driver.switchTo().defaultContent();
-            }
-            return true;
-        } catch (TimeoutException | NoSuchElementException e) {
-            try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
-            return false;
-        }
-    }
-
-    public void busquedaMovimientos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-        try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-            WebElement landing = body.findElement(By.cssSelector("legacy-page#cells-template-legacy"));
-            SearchContext s1 = landing.getShadowRoot();
-
-            WebElement navMenu = s1.findElement(By.cssSelector("cells-template-paper-drawer-panel.state-is-visible[state='active']"));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.legacy-microfrontend")
+            // 2) Ubicar índice de cuenta en combo
+            Integer idxTarget = (Integer) iframe.evaluate(
+                    "(target) => {" +
+                            "const clean = s => (s || '').replace(/\\D/g, '');" +
+                            "const app = document.querySelector('div#app__content');" +
+                            "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                            "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                            "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                            "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                            "const selectHost = header?.querySelector('div[slot=\"selectFilterProductSlot\"] bbva-form-select-filter');" +
+                            "if (!selectHost) return -1;" +
+                            "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            "if (!opts.length && selectHost.shadowRoot) opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            "for (let i = 0; i < opts.length; i++) {" +
+                            "  const o = opts[i];" +
+                            "  const raw = o.getAttribute('value') || o.getAttribute('aria-label') || (o.textContent || '').trim();" +
+                            "  if (clean(raw) === target) return i;" +
+                            "}" +
+                            "return -1;" +
+                            "}",
+                    cuentaTarget
             );
-            SearchContext s2 = iframeHost.getShadowRoot();
 
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-
-            driver.switchTo().frame(iframe);
-
-            try {
-                WebElement containerBody = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("div#kyop-container-body")
-                ));
-                WebElement kyopBody = containerBody.findElement(By.cssSelector("div#kyop-body"));
-                WebElement kyopBodyTable = kyopBody.findElement(By.cssSelector("table#kyop-boby-table"));
-                WebElement td = kyopBodyTable.findElement(By.cssSelector("tbody tr td#kyop-body-table-td"));
-                WebElement kyopIframeContainer = td.findElement(By.cssSelector("div#kyop-central-load-area-container"));
-                WebElement iframeKyopCentral = kyopIframeContainer.findElement(By.cssSelector("iframe#kyop-central-load-area"));
-
-                wait.until(ExpectedConditions.frameToBeAvailableAndSwitchToIt(iframeKyopCentral));
-                try {
-                    WebElement selectElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("AsuntoPropio")
-                    ));
-
-                    Select cuentaSelect = new Select(selectElement);
-
-                    boolean cuentaEncontrada = false;
-                    for (WebElement option : cuentaSelect.getOptions()) {
-                        String optionValue = option.getAttribute("value");
-                        if (optionValue.contains(numeroCuenta)) {
-                            cuentaSelect.selectByValue(optionValue);
-                            cuentaEncontrada = true;
-                            break;
-                        }
-                    }
-
-                    if (!cuentaEncontrada) {
-                        log.error("No se encontró la cuenta con valor: {}", numeroCuenta);
-                        throw new BbvaException("No se encontró cuenta");
-                    }
-
-                    WebElement radioVisual = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.cssSelector("input#radio1 + i.radio")
-                    ));
-
-                    if (!radioVisual.isSelected()) {
-                        radioVisual.click();
-                    }
-
-                    MetodsGeneric.randomWait(500, 1000);
-
-                    String[] partesDesde = fechaDesde.split("/");
-                    String[] partesHasta = fechaHasta.split("/");
-
-                    if (partesDesde.length != 3 || partesHasta.length != 3) {
-                        log.error("Formato de fecha incorrecto. Use dd/mm/yyyy");
-                    }
-
-                    // Fecha Desde
-                    WebElement diaDesde = driver.findElement(By.name("DiaDesde"));
-                    WebElement mesDesde = driver.findElement(By.name("MesDesde"));
-                    WebElement anioDesde = driver.findElement(By.name("AnioDesde"));
-
-                    diaDesde.clear();
-                    diaDesde.sendKeys(partesDesde[0]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    mesDesde.clear();
-                    mesDesde.sendKeys(partesDesde[1]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    anioDesde.clear();
-                    anioDesde.sendKeys(partesDesde[2]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    // Fecha Hasta
-                    WebElement diaHasta = driver.findElement(By.name("DiaHasta"));
-                    WebElement mesHasta = driver.findElement(By.name("MesHasta"));
-                    WebElement anioHasta = driver.findElement(By.name("AnioHasta"));
-
-                    diaHasta.clear();
-                    diaHasta.sendKeys(partesHasta[0]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    mesHasta.clear();
-                    mesHasta.sendKeys(partesHasta[1]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    anioHasta.clear();
-                    anioHasta.sendKeys(partesHasta[2]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    WebElement btnConsultar = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.cssSelector("input[value='Consultar']")
-                    ));
-
-                    btnConsultar.click();
-                } finally {
-                    driver.switchTo().defaultContent();
-                }
-            } catch (Exception innerException) {
-                driver.switchTo().defaultContent();
-                throw innerException;
+            if (idxTarget == null || idxTarget < 0) {
+                throw new BbvaException("La cuenta " + numeroCuenta + " no existe en el combo de cuentas");
             }
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
-            try {
-                driver.switchTo().defaultContent();
-            } catch (Exception ignore) {
-                log.error("Ya se encuentra en el default context de driver manager");
-            }
+
+            // 3) Seleccionar cuenta target
+            iframe.evaluate(
+                    "(targetIdx) => {" +
+                            "const app = document.querySelector('div#app__content');" +
+                            "const mov = app?.querySelector('bbva-btge-accounts-solution-movements-page#cells-template-bbva-btge-accounts-solution-movements');" +
+                            "const panel = mov?.shadowRoot?.querySelector(\"cells-template-paper-drawer-panel[state='active']\");" +
+                            "const wrapper = panel?.querySelector('div[slot=\"app__main\"] div.main-content div.page-wrapper');" +
+                            "const header = wrapper?.querySelector('bbva-btge-web-header-product#transactionsHeaderProduct');" +
+                            "const selectHost = header?.querySelector('div[slot=\"selectFilterProductSlot\"] bbva-form-select-filter');" +
+                            "if (!selectHost) return false;" +
+                            "let opts = Array.from(selectHost.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            "if (!opts.length && selectHost.shadowRoot) opts = Array.from(selectHost.shadowRoot.querySelectorAll('bbva-form-filter-option[role=\"option\"]'));" +
+                            "const target = opts[targetIdx];" +
+                            "if (!target) return false;" +
+                            "opts.forEach(o => {" +
+                            "  o.removeAttribute('selected');" +
+                            "  o.setAttribute('aria-selected','false');" +
+                            "  if ((o.getAttribute('ambient') || '').toLowerCase() === 'secondary') o.removeAttribute('ambient');" +
+                            "});" +
+                            "target.setAttribute('selected','');" +
+                            "target.setAttribute('aria-selected','true');" +
+                            "target.setAttribute('ambient','secondary');" +
+                            "const newValue = target.getAttribute('value') || '';" +
+                            "if (newValue) {" +
+                            "  try { selectHost.value = newValue; } catch(e) {}" +
+                            "  selectHost.setAttribute('value', newValue);" +
+                            "}" +
+                            "try { target.click(); } catch(e) {}" +
+                            "selectHost.dispatchEvent(new Event('input', { bubbles:true, composed:true }));" +
+                            "selectHost.dispatchEvent(new Event('change', { bubbles:true, composed:true }));" +
+                            "selectHost.dispatchEvent(new CustomEvent('value-changed', { bubbles:true, composed:true, detail:{ value:newValue } }));" +
+                            "return true;" +
+                            "}",
+                    idxTarget
+            );
+
+            MetodsGeneric.randomWait(1_000, 2_000);
+
+            // 4) Fechas con tipeo humanizado (solo dígitos por máscara dd/mm/yyyy)
+            String fdDigits = (fechaDesde == null) ? "" : fechaDesde.replaceAll("\\D", "");
+            String fhDigits = (fechaHasta == null) ? "" : fechaHasta.replaceAll("\\D", "");
+
+            // Campo de texto previo (concepto/beneficiario...)
+            Locator txtBusqueda = iframe.locator(
+                    "bbva-btge-transactions-table-wrapper#accountTransactionsWrapper " +
+                            "bbva-btge-table-filter bbva-form-input input[slot='_input']"
+            ).first();
+
+            Locator inFrom = iframe.locator(
+                    "bbva-btge-transactions-table-wrapper#accountTransactionsWrapper " +
+                            "bbva-btge-table-filter bbva-form-date-range input[name='from']"
+            ).first();
+
+            Locator inTo = iframe.locator(
+                    "bbva-btge-transactions-table-wrapper#accountTransactionsWrapper " +
+                            "bbva-btge-table-filter bbva-form-date-range input[name='to']"
+            ).first();
+
+            txtBusqueda.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(timeoutMs));
+            inFrom.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(timeoutMs));
+            inTo.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(timeoutMs));
+
+            // 4.1 Click en caja de búsqueda + TAB para caer al primer date input
+            txtBusqueda.click(new Locator.ClickOptions().setForce(true));
+            MetodsGeneric.randomWaitPage(page, 80, 140);
+            txtBusqueda.press("Tab");
+
+            // 4.2 Escribir fecha desde (solo dígitos) -> UI auto avanza al segundo input
+            MetodsGeneric.humanTypeWithKeyboard(page, fdDigits, 80, 160);
+
+            // 4.3 Espera corta y escribir fecha hasta sin click adicional
+            MetodsGeneric.randomWaitPage(page, 120, 220);
+            MetodsGeneric.humanTypeWithKeyboard(page, fhDigits, 80, 160);
+
+            // Opcional blur final suave
+            MetodsGeneric.randomWaitPage(page, 120, 220);
+
+            // 5) Click Buscar
+            Locator btnBuscar = iframe.locator(
+                    "bbva-btge-transactions-table-wrapper#accountTransactionsWrapper " +
+                            "bbva-btge-table-filter bbva-button-default:has-text('Buscar')"
+            ).first();
+            btnBuscar.click(new Locator.ClickOptions().setTimeout(timeoutMs));
+
+            // 6) Espera corta post-búsqueda (luego podemos cambiar por wait de grilla)
+            iframe.waitForTimeout(700);
         } catch (BbvaException e) {
             throw e;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BbvaException("Interrupción durante la navegación",
-                    "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
         } catch (Exception e) {
             log.error("Error al realizar busqueda por movimientos: {}", e.getMessage());
         }
     }
 
-    public List<Map<String, Object>> extraerMovimientos(WebDriver driver) {
+    public List<Map<String, Object>> extraerMovimientos(Page page) {
         List<Map<String, Object>> movimientos = new ArrayList<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+        int timeoutMs = 5_000;
 
         try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-            WebElement landing = body.findElement(By.cssSelector("legacy-page#cells-template-legacy"));
-            SearchContext s1 = landing.getShadowRoot();
+            MetodsGeneric.waitForAttached(page, "bbva-btge-app-template#app__content", timeoutMs);
+            MetodsGeneric.randomWait(1_000, 2_000);
 
-            WebElement navMenu = s1.findElement(By.cssSelector("cells-template-paper-drawer-panel.state-is-visible[state='active']"));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.legacy-microfrontend")
-            );
-            SearchContext s2 = iframeHost.getShadowRoot();
+            ElementHandle iframeEl = page.evaluateHandle(
+                    "() => {" +
+                            "const body = document.querySelector('bbva-btge-app-template#app__content');" +
+                            "const landing = body.querySelector(" +
+                            "'bbva-btge-accounts-solution-page#cells-template-bbva-btge-accounts-solution'" +
+                            ");" +
+                            "if (!landing || !landing.shadowRoot) return null;" +
 
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
+                            "const panel = landing.shadowRoot.querySelector(" +
+                            "\"cells-template-paper-drawer-panel[state='active']\"" +
+                            ");" +
+                            "if (!panel) return null;" +
 
-            driver.switchTo().frame(iframe);
+                            "const appMain = panel.querySelector(\"div[slot='app__main'].container\");" +
+                            "if (!appMain) return null;" +
 
-            WebElement containerBody = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("div#kyop-container-body")
-            ));
-            WebElement kyopBody = containerBody.findElement(By.cssSelector("div#kyop-body"));
-            WebElement kyopBodyTable = kyopBody.findElement(By.cssSelector("table#kyop-boby-table"));
-            WebElement td = kyopBodyTable.findElement(By.cssSelector("tbody tr td#kyop-body-table-td"));
-            WebElement kyopIframeContainer = td.findElement(By.cssSelector("div#kyop-central-load-area-container"));
-            WebElement iframeKyopCentral = kyopIframeContainer.findElement(By.cssSelector("iframe#kyop-central-load-area"));
+                            "const iframeHost = appMain.querySelector(\"bbva-core-iframe[iframe-title='bbva-btge-accounts-solution']\");" +
+                            "if (!iframeHost || !iframeHost.shadowRoot) return null;" +
 
-            wait.until(ExpectedConditions.frameToBeAvailableAndSwitchToIt(iframeKyopCentral));
-            movimientos = extractMovimientos(driver);
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
+                            "const iframeContainer = iframeHost.shadowRoot.querySelector('div#iframeContainer.iframe-container');" +
+                            "if (!iframeContainer) return null;" +
+
+                            "return iframeContainer.querySelector('iframe#bbvaIframe');" +
+                            "}"
+            ).asElement();
+
+            if (iframeEl == null) {
+                throw new BbvaException("No se encontró iframe#bbvaIframe (legacy)");
+            }
+
+            Frame iframe = iframeEl.contentFrame();
+            if (iframe == null) {
+                throw new BbvaException("No se pudo obtener contentFrame() de iframe#bbvaIframe");
+            }
+
+            // 1) Expandir todos los "Ver más" (si existen) en bucle
+            log.info("[EXTRACCION] tabla encontrada, inicio expandir ver mas");
+
+            for (int i = 0; i < 15; i++) {
+                Locator tfoot = iframe.locator("bbva-btge-accounts-solution-table#moviments-table table tfoot").first();
+                if (tfoot.count() == 0) {
+                    log.info("[EXTRACCION] no existe tfoot, fin paginacion");
+                    break;
+                }
+
+                String txt = tfoot.innerText().toLowerCase();
+                if (!(txt.contains("ver más") || txt.contains("ver mas"))) {
+                    log.info("[EXTRACCION] no hay 'ver más', fin paginacion");
+                    break;
+                }
+
+                Locator verMas = tfoot.locator("bbva-type-link, [role='button'], button, a, bbva-table-footer").first();
+                if (verMas.count() == 0) {
+                    log.info("[EXTRACCION] tfoot existe pero no hay clickable");
+                    break;
+                }
+
+                int before = iframe.locator("bbva-btge-accounts-solution-table#moviments-table table tbody tr").count();
+                verMas.click(new Locator.ClickOptions().setForce(true).setTimeout(timeoutMs));
+                iframe.waitForTimeout(500);
+
+                int after = iframe.locator("bbva-btge-accounts-solution-table#moviments-table table tbody tr").count();
+                log.info("[EXTRACCION] click ver mas #{} | rows before={} after={}", i + 1, before, after);
+
+                // seguridad: si no crece, corta para evitar loop infinito
+                if (after <= before) break;
+            }
+
+            log.info("[EXTRACCION] fin expandir ver mas, inicio parse tbody");
+
+            Locator rows = iframe.locator("bbva-btge-accounts-solution-table#moviments-table table tbody tr");
+            rows.first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.ATTACHED)
+                    .setTimeout(timeoutMs));
+
+            int n = rows.count();
+            log.info("rows count={}", n);
+
+            // 2) Extraer filas de tbody con tu formato
+            for (int i = 0; i < n; i++) {
+                Locator row = rows.nth(i);
+                if (row.locator("td").count() < 5) continue;
+
+                String day = safeAttr(row.locator("bbva-table-body-date.operationDate").first(), "date");
+                String year = safeAttr(row.locator("bbva-table-body-date.operationDate").first(), "year");
+                String fecha = toFecha(day, year); // dd/MM/yyyy
+
+                String conceptMain = safeAttr(row.locator("bbva-table-body-text.concept").first(), "text");
+                String conceptSub  = safeAttr(row.locator("bbva-table-body-text.concept").first(), "description");
+                String descripcion = (conceptMain + " " + conceptSub).replaceAll("\\s+", " ").trim();
+
+                String numMovRaw = safeAttr(row.locator("bbva-table-body-text.numberMovement").first(), "text");
+                String operacion = MetodsGeneric.completarADiezDigitos(
+                        numMovRaw == null ? "" : numMovRaw.replaceAll("\\D", "")
+                );
+
+                String amountStr = safeAttr(row.locator("bbva-table-body-amount.transactionAmount").first(), "amount");
+                double montoRaw = 0d;
+                try { montoRaw = Double.parseDouble(amountStr); } catch (Exception ignored) {}
+
+                Map<String, Object> mov = new HashMap<>();
+                mov.put(Constantes.KEY_FECHA, fecha);
+                mov.put(Constantes.KEY_FECHA_VALOR, "");
+                mov.put(Constantes.KEY_DESCRIPCION, descripcion);
+                mov.put(Constantes.KEY_OPERACION, operacion);
+                mov.put(Constantes.KEY_MONTO, Math.abs(montoRaw));
+                mov.put(Constantes.KEY_TIPO, montoRaw < 0 ? Constantes.VALOR_DEBITO : Constantes.VALOR_CREDITO);
+                mov.put(Constantes.KEY_SALDO, "");
+                mov.put(Constantes.KEY_REFERENCIA, "");
+                movimientos.add(mov);
+            }
+            log.info("se extrajo movimientos");
         } catch (Exception e) {
             log.error("Error al realizar busqueda por movimientos: {}", e.getMessage());
         }
@@ -451,12 +853,12 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         return movimientos;
     }
 
-    public List<Map<String, Object>> extraerDetalleMovimientos(WebDriver driver, List<Map<String, Object>> listMovements) {
+    public List<Map<String, Object>> extraerDetalleMovimientos(Page page, List<Map<String, Object>> listMovements) {
         List<Map<String, Object>> movimientosConDetalle = new ArrayList<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+        //WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
         try {
-            WebElement tabla = wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("table.tb_data")));
+            /*WebElement tabla = wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("table.tb_data")));
             Map<String, RowInfo> mapaDom = mapearFilasListado(driver, tabla);
 
             for (Map<String, Object> mov : listMovements) {
@@ -497,9 +899,7 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
                         }
                     }
                 }
-            }
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
+            }*/
         } catch (Exception e) {
             log.error("Error al realizar busqueda por movimientos: {}", e.getMessage());
         }
@@ -507,556 +907,118 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         return movimientosConDetalle;
     }
 
-    public boolean clickMovimientosHistoricos(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
+    public boolean clickSalir(Page page) {
+        int timeoutMs = 5_000;
         try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
+            Locator host = page.locator("bbva-btge-sidebar-menu.sidebar[slot='nav']").first();
+            host.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.ATTACHED)
+                    .setTimeout(timeoutMs));
 
-            WebElement landing = body.findElement(By.cssSelector(
-                    "bbva-btge-menurization-landing-solution-page#cells-template-bbva-btge-menurization-landing-solution"
-            ));
-            SearchContext s1 = landing.getShadowRoot();
-
-            WebElement navMenu = s1.findElement(By.cssSelector(
-                    "cells-template-paper-drawer-panel.state-is-visible[state='active']"
-            ));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.microfrontend-iframe")
-            );
-
-            SearchContext s2 = iframeHost.getShadowRoot();
-
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-            driver.switchTo().frame(iframe);
-            try {
-                WebElement homeHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("bbva-btge-menurization-landing-solution-home-page#cells-template-bbva-btge-menurization-landing-solution-home")
-                ));
-                SearchContext s4 = homeHost.getShadowRoot();
-
-                WebElement mainContainer = s4.findElement(By.cssSelector("div[slot='app__main'].main-container"));
-                WebElement wrapper = mainContainer.findElement(By.cssSelector("div.wrapper"));
-                WebElement layout = wrapper.findElement(By.cssSelector("bbva-foundations-grid-default-layout.content-layout.container-cards"));
-                WebElement leftCol = layout.findElement(By.cssSelector("div.column[slot='right']"));
-                WebElement sectionCard = leftCol.findElement(By.cssSelector("div.section-card"));
-                WebElement contentLevel = sectionCard.findElement(By.cssSelector("div.content-level"));
-
-                WebElement link = contentLevel.findElement(
-                        By.xpath(".//bbva-web-link[@class='link-level' and @role='button'][normalize-space(.)='Histórico de movimientos']")
-                );
-
-                wait.until(ExpectedConditions.visibilityOf(link));
-                try {
-                    wait.until(ExpectedConditions.elementToBeClickable(link)).click();
-                } catch (ElementNotInteractableException e) {
-                    ((JavascriptExecutor) driver).executeScript("arguments[0].click();", link);
+            // 1) Intento directo por evaluate en shadow roots
+            Boolean clickedByEval = (Boolean) page.evaluate("""
+                () => {
+                  const host = document.querySelector("bbva-btge-sidebar-menu.sidebar[slot='nav']");
+                  if (!host || !host.shadowRoot) return false;
+                
+                  const nav = host.shadowRoot.querySelector("bbva-web-navigation-menu[aria-label='Main menu']");
+                  if (!nav) return false;
+                
+                  const root = nav.shadowRoot || nav;
+                  let exit = root.querySelector("bbva-web-navigation-menu-item-action[item-action='exit']");
+                  if (!exit) {
+                    exit = root.querySelector("bbva-web-navigation-menu-item-action[variant='exit'], bbva-web-navigation-menu-item-action[class*='exit']");
+                  }
+                  if (!exit) return false;
+                
+                  exit.click();
+                  return true;
                 }
-            } finally {
-                driver.switchTo().defaultContent();
-            }
-            return true;
-        } catch (TimeoutException | NoSuchElementException e) {
-            try { driver.switchTo().defaultContent(); } catch (Exception ignore) {}
-            return false;
-        }
-    }
+                """);
+            if (Boolean.TRUE.equals(clickedByEval)) return true;
 
-    public void busquedaMovimientosHistoricos(WebDriver driver, String numeroCuenta, String fechaDesde, String fechaHasta) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+            // 2) Fallback: click por coordenada (simula tu click manual en hotspot)
+            BoundingBox box = host.boundingBox();
+            if (box != null) {
+                // Ajusta estos offsets si quieres; aquí apunta a zona baja del menú donde suele estar "Salir"
+                double x = box.x + Math.min(120, box.width * 0.55);
+                double y = box.y + Math.max(40, box.height - 28);
 
-        try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-            WebElement landing = body.findElement(By.cssSelector("legacy-page#cells-template-legacy"));
-            SearchContext s1 = landing.getShadowRoot();
-
-            WebElement navMenu = s1.findElement(By.cssSelector("cells-template-paper-drawer-panel.state-is-visible[state='active']"));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.legacy-microfrontend")
-            );
-            SearchContext s2 = iframeHost.getShadowRoot();
-
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-
-            driver.switchTo().frame(iframe);
-
-            try {
-                WebElement containerBody = wait.until(ExpectedConditions.presenceOfElementLocated(
-                        By.cssSelector("div#kyop-container-body")
-                ));
-                WebElement kyopBody = containerBody.findElement(By.cssSelector("div#kyop-body"));
-                WebElement kyopBodyTable = kyopBody.findElement(By.cssSelector("table#kyop-boby-table"));
-                WebElement td = kyopBodyTable.findElement(By.cssSelector("tbody tr td#kyop-body-table-td"));
-
-                WebElement iframeKyopCentral = td.findElement(By.cssSelector("iframe#kyop-central-load-area"));
-
-                wait.until(ExpectedConditions.frameToBeAvailableAndSwitchToIt(iframeKyopCentral));
-                try {
-                    WebElement cBancElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("cBanc")
-                    ));
-                    WebElement cOficElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("cOfic")
-                    ));
-                    WebElement cContElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("cCont")
-                    ));
-                    WebElement cFoliElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("cFoli")
-                    ));
-
-                    WebElement selectElement = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("listaCuentas")
-                    ));
-
-                    Select cuentaSelect = new Select(selectElement);
-
-                    boolean cuentaEncontrada = false;
-                    String valorEncontrado = null;
-                    for (WebElement option : cuentaSelect.getOptions()) {
-                        String value = String.valueOf(option.getDomAttribute("value"));
-                        if (value == null) continue;
-
-                        String posterior = value.contains("@") ? value.substring(value.indexOf('@') + 1) : value;
-                        String digits = posterior.replaceAll("\\D", "");
-                        String normalized = removeIntercalatedCodeAfter8(digits);
-
-                        if (numeroCuenta.equals(normalized)) {
-                            cuentaEncontrada = true;
-                            valorEncontrado = value;
-                            log.info("✅ Cuenta encontrada: {}", value);
-                            break;
-                        }
-                    }
-
-                    if (cuentaEncontrada && valorEncontrado != null) {
-                        // Extraer y rellenar las cajas de texto directamente
-                        rellenarCajasTexto(valorEncontrado, cBancElement, cOficElement, cContElement, cFoliElement);
-                    } else {
-                        log.error("No se encontró la cuenta con valor: {}", numeroCuenta);
-                    }
-
-                    WebElement radioVisual = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.cssSelector("input#rad2 + i.radio")
-                    ));
-
-                    if (!radioVisual.isSelected()) {
-                        radioVisual.click();
-                    }
-
-                    MetodsGeneric.randomWait(500, 1000);
-
-                    String[] partesDesde = fechaDesde.split("/");
-                    String[] partesHasta = fechaHasta.split("/");
-
-                    if (partesDesde.length != 3 || partesHasta.length != 3) {
-                        log.error("Formato de fecha incorrecto. Use dd/mm/yyyy");
-                    }
-
-                    // Fecha Desde
-                    WebElement desde = driver.findElement(By.name("fechaDesde"));
-
-                    desde.clear();
-                    desde.sendKeys(partesDesde[0] + "-" + partesDesde[1] + "-" + partesDesde[2]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    // Fecha Hasta
-                    WebElement hasta = driver.findElement(By.name("fechaHasta"));
-
-                    hasta.clear();
-                    hasta.sendKeys(partesHasta[0] + "-" + partesHasta[1] + "-" + partesHasta[2]);
-                    MetodsGeneric.randomWait(500, 800);
-
-                    //Combo segunda ordenacion
-                    WebElement selectSegundaOrdenacion = wait.until(ExpectedConditions.presenceOfElementLocated(
-                            By.name("indiceOrdenacion2")
-                    ));
-
-                    Select segundaOrdenacion = new Select(selectSegundaOrdenacion);
-
-                    boolean segunda = false;
-                    for (WebElement option : segundaOrdenacion.getOptions()) {
-                        String optionValue = option.getAttribute("value");
-                        if (optionValue.contains("4")) {
-                            segundaOrdenacion.selectByValue(optionValue);
-                            segunda = true;
-                            break;
-                        }
-                    }
-
-                    if (!segunda) {
-                        log.error("No se encontró segunda ordenación con valor: {}", numeroCuenta);
-                    }
-
-                    WebElement btnAceptar = wait.until(ExpectedConditions.elementToBeClickable(
-                            By.cssSelector("input[value='Aceptar']")
-                    ));
-
-                    btnAceptar.click();
-                } finally {
-                    driver.switchTo().defaultContent();
-                }
-            } catch (Exception innerException) {
-                driver.switchTo().defaultContent();
-                throw innerException;
-            }
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
-            try {
-                driver.switchTo().defaultContent();
-            } catch (Exception ignore) {
-                log.error("Ya se encuentra en el default context de driver manager");
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new BbvaException("Interrupción durante la navegación",
-                    "BBVA_NAVIGATION_INTERRUPTED",
-                    "El proceso fue interrumpido durante la navegación");
-        } catch (Exception e) {
-            log.error("Error al realizar busqueda por movimientos: {}", e.getMessage());
-        }
-    }
-
-    public List<Map<String, Object>> extraerMovimientosHistoricos(WebDriver driver) {
-        List<Map<String, Object>> movimientos = new ArrayList<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-        try {
-            WebElement body = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-            WebElement landing = body.findElement(By.cssSelector("legacy-page#cells-template-legacy"));
-            SearchContext s1 = landing.getShadowRoot();
-
-            WebElement navMenu = s1.findElement(By.cssSelector("cells-template-paper-drawer-panel.state-is-visible[state='active']"));
-            WebElement appMain = navMenu.findElement(By.cssSelector("div[slot='app__main'].container"));
-            WebElement iframeHost = appMain.findElement(
-                    By.cssSelector("bbva-core-iframe.legacy-microfrontend")
-            );
-            SearchContext s2 = iframeHost.getShadowRoot();
-
-            WebElement iframeContainer = s2.findElement(By.cssSelector("div#iframeContainer.iframe-container"));
-            WebElement iframe = iframeContainer.findElement(By.cssSelector("iframe#bbvaIframe"));
-
-            driver.switchTo().frame(iframe);
-
-            WebElement containerBody = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("div#kyop-container-body")
-            ));
-            WebElement kyopBody = containerBody.findElement(By.cssSelector("div#kyop-body"));
-            WebElement kyopBodyTable = kyopBody.findElement(By.cssSelector("table#kyop-boby-table"));
-            WebElement td = kyopBodyTable.findElement(By.cssSelector("tbody tr td#kyop-body-table-td"));
-
-            WebElement kyopIframeContainer = td.findElement(By.cssSelector("div#kyop-central-load-area-container"));
-            WebElement iframeKyopCentral = kyopIframeContainer.findElement(By.cssSelector("iframe#kyop-central-load-area"));
-
-            wait.until(ExpectedConditions.frameToBeAvailableAndSwitchToIt(iframeKyopCentral));
-            movimientos = extractMovimientosHistoricos(driver);
-        } catch (TimeoutException | NoSuchElementException e) {
-            log.error("Error al mapear contenido del iframe: {}", e.getMessage());
-        } catch (Exception e) {
-            log.error("Error al realizar busqueda por movimientos: {}", e.getMessage());
-        }
-
-        return movimientos;
-    }
-
-    public boolean clickSalir(WebDriver driver) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
-        try {
-            WebElement appHost = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("bbva-btge-app-template#app__content")
-            ));
-
-            WebElement navMenu = appHost.findElement(By.cssSelector("bbva-btge-sidebar-menu.sidebar[slot='nav']"));
-
-            SearchContext s1 = navMenu.getShadowRoot();
-
-            WebElement container;
-            try {
-                container = s1.findElement(By.cssSelector("div.container"));
-            } catch (NoSuchElementException e) {
-                container = navMenu.findElement(By.cssSelector("div.container"));
-            }
-
-            WebElement sidebar = container.findElement(By.cssSelector("bbva-web-navigation-menu[role='navigation'][aria-label='Main menu']"));
-
-            SearchContext s2 = sidebar.getShadowRoot();
-
-            WebElement buttonSalir = s2.findElement(By.cssSelector("bbva-web-navigation-menu-item-action[role='button']"));
-
-            wait.until(ExpectedConditions.visibilityOf(buttonSalir));
-            try {
-                wait.until(ExpectedConditions.elementToBeClickable(buttonSalir)).click();
+                page.mouse().move(x, y);
+                page.waitForTimeout(120);
+                page.mouse().click(x, y);
                 return true;
-            } catch (ElementNotInteractableException e) {
-                ((JavascriptExecutor) driver).executeScript("arguments[0].click();", buttonSalir);
-                return false;
             }
 
-        } catch (TimeoutException | NoSuchElementException e) {
+            return false;
+
+        } catch (Exception e) {
+            log.warn("clickSalir falló: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * Extrae mocimientos de la tabla de resultado
-     *
-     * @param driver Manejador de página
-     * @return {@link List<Map>}
-     */
-    /*private List<Map<String, Object>> extractMovimientos(WebDriver driver) {
-        List<Map<String, Object>> movimientos = new ArrayList<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
+    public boolean clickCerrarSesionModal(Page page) {
+        int timeoutMs = 5_000;
 
         try {
-            WebElement tabla = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("table.tb_data")
-            ));
+            MetodsGeneric.randomWait(1_000, 2_000);
 
-            List<WebElement> filas = tabla.findElements(By.cssSelector("tr.odd, tr.even"));
+            page.locator("text=¿Deseas cerrar la sesión?").first()
+                    .waitFor(new Locator.WaitForOptions()
+                            .setState(WaitForSelectorState.ATTACHED)
+                            .setTimeout(timeoutMs));
 
-            for (WebElement fila : filas) {
-                List<WebElement> columnas = fila.findElements(By.tagName("td"));
-
-                if (columnas.size() >= 5) {
-                    Map<String, Object> movimiento = extraerMovimientoDeFila(columnas);
-                    movimientos.add(movimiento);
-
-                    String itfText = getColumnText(columnas.get(3)).trim();
-                    double itfValue = MetodsGeneric.parseSaldo(itfText);
-
-                    if (Math.abs(itfValue) > 0.001) {
-                        Map<String, Object> movimientoITF = crearMovimientoITF(movimiento, itfValue);
-                        movimientos.add(movimientoITF);
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("Error al extraer movimientos: {}", e.getMessage());
-        }
-
-        return movimientos;
-    }*/
-
-    /**
-     * Extrae los datos de una fila de movimiento
-     */
-    /*private Map<String, Object> extraerMovimientoDeFila(List<WebElement> columnas) {
-        Map<String, Object> movimiento = new HashMap<>();
-
-        movimiento.put(Constantes.KEY_FECHA, getColumnText(columnas.get(0)));
-
-        movimiento.put(Constantes.KEY_FECHA_VALOR, "");
-
-        String descripcion = getColumnText(columnas.get(1));
-        descripcion = descripcion.replaceAll("\\s+", " ").trim();
-        movimiento.put(Constantes.KEY_DESCRIPCION, descripcion);
-
-        movimiento.put(Constantes.KEY_OPERACION, MetodsGeneric.completarADiezDigitos(getColumnText(columnas.get(4))));
-
-        String montoText = getColumnText(columnas.get(2));
-        double monto = MetodsGeneric.parseSaldo(montoText);
-        movimiento.put(Constantes.KEY_MONTO, monto);
-
-        if (montoText.contains("-")) {
-            movimiento.put(Constantes.KEY_TIPO, Constantes.VALOR_DEBITO);
-        } else {
-            movimiento.put(Constantes.KEY_TIPO, Constantes.VALOR_CREDITO);
-        }
-
-        movimiento.put(Constantes.KEY_SALDO, "");
-
-        movimiento.put(Constantes.KEY_REFERENCIA, "");
-
-        return movimiento;
-    }*/
-
-    /**
-     * Crea un movimiento adicional para el ITF
-     */
-    /*private Map<String, Object> crearMovimientoITF(Map<String, Object> movimientoOriginal, double itfValue) {
-        Map<String, Object> movimientoITF = new HashMap<>();
-
-        movimientoITF.put("fecha", movimientoOriginal.get("fecha"));
-        movimientoITF.put(Constantes.KEY_REFERENCIA, "");
-
-        String descripcionOriginal = (String) movimientoOriginal.get(Constantes.KEY_DESCRIPCION);
-        movimientoITF.put(Constantes.KEY_DESCRIPCION, descripcionOriginal + " - ITF");
-
-        movimientoITF.put("operacion", "");
-
-        movimientoITF.put("monto", Math.abs(itfValue));
-
-        movimientoITF.put("tipo", "DEBITO");
-
-        movimientoITF.put("saldo", "");
-
-        return movimientoITF;
-    }*/
-
-    /**
-     * Obtiene el texto de una columna, manejando elementos anidados
-     */
-    /*private String getColumnText(WebElement columna) {
-        try {
-            List<WebElement> enlaces = columna.findElements(By.tagName("a"));
-            if (!enlaces.isEmpty()) {
-                return enlaces.get(0).getText().trim();
-            }
-
-            return columna.getText().trim();
-        } catch (Exception e) {
-            return "";
-        }
-    }*/
-
-    /*private Map<String, Object> mapearContenedorSeccion(WebElement contenedorSeccion) {
-        Map<String, Object> mapa = new HashMap<>();
-        try {
-            WebElement contenidoAcordion = contenedorSeccion.findElement(
-                    By.cssSelector("div.contenido-acordion#cont_acordion0")
-            );
-            WebElement subContenedor = contenidoAcordion.findElement(
-                    By.cssSelector("div.sub-contenedor-seccion#contenedor0_1")
-            );
-
-            WebElement contenidoAcordionInterno = subContenedor.findElement(
-                    By.cssSelector("div.contenido-acordion#cont_sub-acordion0_1")
-            );
-
-            WebElement tabla = contenidoAcordionInterno.findElement(
-                    By.cssSelector("table.tb_data.mobile_h#tabla-contenedor0_1")
-            );
-            mapa = mapearTabla(tabla);
-        } catch (NoSuchElementException e) {
-            log.warn("Error al mapear contenedor: {}", e.getMessage());
-            mapa.put(Constantes.KEY_ERROR_CODE, e.getMessage());
-        }
-
-        return mapa;
-    }*/
-
-    /*private Map<String, Object> mapearTabla(WebElement tabla) {
-        Map<String, Object> mapaTabla = new HashMap<>();
-
-        try {
-            List<Map<String, Object>> filas = new ArrayList<>();
-            List<WebElement> filasElementos = tabla.findElements(
-                    By.xpath(".//tbody/tr[not(contains(@class,'tb_column_header'))]")
-            );
-
-            for (WebElement fila : filasElementos) {
-                Map<String, Object> filaMap = mapearFila(fila);
-                filas.add(filaMap);
-            }
-
-            mapaTabla.put("data", filas);
-            mapaTabla.put("count", filas.size());
-
-        } catch (NoSuchElementException e) {
-            log.warn("Error al mapear tabla: {}", e.getMessage());
-            mapaTabla.put("error", e.getMessage());
-        }
-
-        return mapaTabla;
-    }
-
-    private Map<String, Object> mapearFila(WebElement fila) {
-        Map<String, Object> filaMap = new HashMap<>();
-
-        try {
-            List<WebElement> celdas = fila.findElements(By.tagName("td"));
-
-            if (celdas.size() >= 5) {
-                WebElement enlace = celdas.get(0).findElement(By.cssSelector("a.enlace"));
-                filaMap.put(Constantes.KEY_NUMERO_CUENTA, MetodsGeneric.cleanAccountNumber(enlace.getText().trim()));
-
-                filaMap.put(Constantes.KEY_TIPO_CUENTA, celdas.get(1).getText().trim());
-
-                String saldoContableStr = celdas.get(2).getText().trim();
-                filaMap.put(Constantes.KEY_SALDO_CONT, MetodsGeneric.parseSaldo(saldoContableStr));
-
-                String saldoDisponibleStr = celdas.get(3).getText().trim();
-                filaMap.put(Constantes.KEY_SALDO_DISP, MetodsGeneric.parseSaldo(saldoDisponibleStr));
-
-                filaMap.put(Constantes.KEY_MONEDA, celdas.get(4).getText().trim());
-            }
-        } catch (NoSuchElementException e) {
-            log.warn("Error al mapear fila: {}", e.getMessage());
-            filaMap.put("error", e.getMessage());
-        }
-
-        return filaMap;
-    }
-
-    private static class RowInfo {
-        String operacion;
-        String hrefAbsoluto;
-        WebElement linkElem;
-    }
-
-    private Map<String, RowInfo> mapearFilasListado(WebDriver driver, WebElement tabla) {
-        Map<String, RowInfo> mapa = new HashMap<>();
-        List<WebElement> filas = tabla.findElements(By.cssSelector("tr.odd, tr.even"));
-        for(WebElement fila : filas) {
-            List<WebElement> tds = fila.findElements(By.tagName("td"));
-
-            WebElement tdRef = tds.get(1);
-            WebElement a;
+            // 2) Intento directo por rol/texto del botón visible
             try {
-                a = tdRef.findElement(By.cssSelector("a.enlace"));
-            } catch (NoSuchElementException ex) {
-                continue;
-            }
+                Locator btn = page.getByRole(AriaRole.BUTTON,
+                        new Page.GetByRoleOptions().setName("Cerrar sesión")).first();
+                btn.click(new Locator.ClickOptions().setTimeout(2_500));
+                return true;
+            } catch (Exception ignore) {}
 
-            WebElement tdOperacion = tds.get(4);
-            String operacion = normalizar(MetodsGeneric.completarADiezDigitos(tdOperacion.getText()));
-            if (operacion.isEmpty()) continue;
+            // 3) Fallback por locator de texto (incluye web components)
+            try {
+                Locator btnText = page.locator("text=Cerrar sesión").first();
+                btnText.click(new Locator.ClickOptions().setForce(true).setTimeout(2_500));
+                return true;
+            } catch (Exception ignore) {}
 
-            String hrefRel = a.getDomAttribute("href");
-            String hrefAbs = hrefRel;
-            if (hrefRel != null && !hrefRel.toLowerCase().startsWith("http")) {
-                String base = driver.getCurrentUrl();
-                hrefAbs = toAbsoluteUrl(base, hrefRel);
-            }
+            // 4) Fallback fuerte: evaluate buscando botón por texto dentro de TODOS los shadow roots
+            Boolean clicked = (Boolean) page.evaluate(
+                    "() => {" +
+                            "const norm = s => (s||'').replace(/\\s+/g,' ').trim().toLowerCase();" +
+                            "const wanted = 'cerrar sesión';" +
+                            "const roots = [document];" +
+                            "const seen = new Set();" +
+                            "while (roots.length) {" +
+                            "  const root = roots.shift();" +
+                            "  if (!root || seen.has(root)) continue;" +
+                            "  seen.add(root);" +
+                            "  const all = root.querySelectorAll('*');" +
+                            "  for (const el of all) {" +
+                            "    if (el.shadowRoot) roots.push(el.shadowRoot);" +
+                            "    const tag = (el.tagName || '').toLowerCase();" +
+                            "    const txt = norm(el.textContent);" +
+                            "    if ((tag.includes('button') || el.getAttribute('role') === 'button') && txt.includes(wanted)) {" +
+                            "      el.click();" +
+                            "      return true;" +
+                            "    }" +
+                            "  }" +
+                            "}" +
+                            "return false;" +
+                            "}"
+            );
 
-            RowInfo ri = new RowInfo();
-            ri.operacion = operacion;
-            ri.hrefAbsoluto = hrefAbs;
-            ri.linkElem = a;
-            mapa.put(operacion, ri);
-        }
-        return mapa;
-    }
+            return Boolean.TRUE.equals(clicked);
 
-    private String toAbsoluteUrl(String base, String rel) {
-        try {
-            java.net.URL baseUrl = new java.net.URL(base);
-            java.net.URL abs = new java.net.URL(baseUrl, rel);
-            return abs.toString();
         } catch (Exception e) {
-            return rel;
+            log.warn("clickCerrarSesionModal falló: {}", e.getMessage());
+            return false;
         }
     }
 
-    private String normalizar(String s) {
-        if (s == null) return "";
-        return s.replace('\u00A0', ' ').trim();
-    }
-
-    private Map<String, Object> abrirYExtraerDetalleConVolver(WebDriver driver, RowInfo info, WebDriverWait wait) throws InterruptedException {
+/*    private Map<String, Object> abrirYExtraerDetalleConVolver(WebDriver driver, RowInfo info, WebDriverWait wait) throws InterruptedException {
         Map<String, Object> detalle = null;
         try {
             info.linkElem.click();
@@ -1114,198 +1076,107 @@ public class BbvaMenuServiceimpl implements BbvaMenuService {
         }
 
         return detalle;
-    }
-
-    private String extraerOperacionDesdeTitulo(String titulo) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)").matcher(titulo);
-        return m.find() ? m.group(1) : null;
-    }
-
-    private String removeIntercalatedCodeAfter8(String s) {
-        if (s == null) return "";
-        if (s.length() <= 10) return s; // demasiado corto para tener intercalado
-        int split = 8;
-        if (s.length() > split + 2) {
-            return s.substring(0, split) + s.substring(split + 2);
-        }
-        return s;
     }*/
 
     /**
-     * Intenta emparejar eliminando cualquier par de 2 dígitos después de la octava posición.
-     * Útil por si el “código” no siempre está exactamente en índice 8 o puede variar.
+     * Cierra un modal si es que se encuentra
+     * @param page manejador de página
      */
-    /*private boolean maybeMatchByRemovingTwoDigits(String sourceDigits, String target) {
-        if (sourceDigits == null) return false;
-        int start = Math.min(8, sourceDigits.length()); // a partir de la 9na posición lógica
-        for (int i = start; i + 2 <= sourceDigits.length(); i++) {
-            String candidate = sourceDigits.substring(0, i) + sourceDigits.substring(i + 2);
-            if (candidate.equals(target)) {
-                return true;
+    public void closeModalIfPresent(Page page) {
+        try {
+            int timeoutMs = 10_000;
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+
+            MetodsGeneric.randomWait(3_000, 4_000);
+            MetodsGeneric.waitForVisible(page, "bbva-btge-app-template#app__content", timeoutMs);
+
+            Locator host = page.locator("bbva-btge-microfrontend-modal[opened]").first();
+            if (host.count() == 0) return;
+
+            host.waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.ATTACHED)
+                    .setTimeout(timeoutMs));
+
+            MetodsGeneric.randomWaitPage(page, 500, 1_000);
+
+            Boolean clicked = (Boolean) page.evaluate(
+                    "() => {" +
+                            "  const host = document.querySelector('bbva-btge-microfrontend-modal[opened]');" +
+                            "  if (!host || !host.shadowRoot) return false;" +
+                            "  const template = host.shadowRoot.querySelector('bbva-web-template-modal');" +
+                            "  if (!template || !template.shadowRoot) return false;" +
+                            "  const btn = template.shadowRoot.querySelector('button.close-btn');" +
+                            "  if (!btn) return false;" +
+                            "  btn.click();" +
+                            "  return true;" +
+                            "}"
+            );
+
+            if (!Boolean.TRUE.equals(clicked)) {
+                log.warn("No se encontró button.close-btn dentro de shadow roots");
+                return;
             }
+
+            try {
+                host.waitFor(new Locator.WaitForOptions()
+                        .setState(WaitForSelectorState.HIDDEN)
+                        .setTimeout(3_000));
+            } catch (Exception ignore) {
+                host.waitFor(new Locator.WaitForOptions()
+                        .setState(WaitForSelectorState.DETACHED)
+                        .setTimeout(3_000));
+            }
+        } catch (Exception e) {
+            log.error("Error al cerrar modal: {}", e.getMessage());
         }
-        return false;
-    }*/
+    }
 
     /**
-     * Extrae movimientos historicos de la tabla de resultado
+     * Devuelve un resultado de una fila html de un locator segun attr
      *
-     * @param driver Manejador de página
-     * @return {@link List<Map>}
+     * @param loc elemento
+     * @param attr nombre de atributo
+     * @return {@link String}
      */
-    /*private List<Map<String, Object>> extractMovimientosHistoricos(WebDriver driver) {
-        List<Map<String, Object>> movimientos = new ArrayList<>();
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
-
+    private String safeAttr(Locator loc, String attr) {
         try {
-            WebElement div = wait.until(ExpectedConditions.presenceOfElementLocated(
-                    By.cssSelector("div.oa")
-            ));
-            WebElement divTable = div.findElement(By.cssSelector("div#divtabla"));
-
-            WebElement tabla = divTable.findElement(By.cssSelector("table.tb_data"));
-
-            List<WebElement> filas = tabla.findElements(By.cssSelector("tr.odd, tr.even"));
-
-            for (WebElement fila : filas) {
-                List<WebElement> columnas = fila.findElements(By.tagName("td"));
-
-                if (columnas.size() < 7) {
-                    continue;
-                }
-
-                Map<String, Object> movimiento = extraerMovimientohistoricoDeFila(columnas);
-                movimientos.add(movimiento);
-            }
-
+            if (loc.count() == 0) return "";
+            String v = loc.getAttribute(attr);
+            return v == null ? "" : v.trim();
         } catch (Exception e) {
-            log.error("Error al extraer movimientos: {}", e.getMessage());
+            return "";
         }
-
-        return movimientos;
-    }*/
+    }
 
     /**
-     * Extrae los datos de una fila de movimiento
+     * Devuelve una fecha formateada
+     * @param dayMon Dia y mes 03 Mar
+     * @param year año
+     * @return {@link String}
      */
-    /*private Map<String, Object> extraerMovimientohistoricoDeFila(List<WebElement> columnas) {
-        Map<String, Object> movimiento = new HashMap<>();
+    private String toFecha(String dayMon, String year) {
+        // dayMon ejemplo: "11 Mar"
+        if (dayMon == null) dayMon = "";
+        if (year == null) year = "";
+        String[] p = dayMon.trim().toLowerCase().split("\\s+");
+        if (p.length < 2 || year.isBlank()) return (dayMon + " " + year).trim();
 
-        // Col 0: F. Operación
-        String fechaOperacion = DateUtils.parsearFechaBarraToSlash(getColumnSpanText(columnas.get(0)));
-        movimiento.put(Constantes.KEY_FECHA, fechaOperacion);
-
-        // Col 1: F. Valor
-        String fechaValor = DateUtils.parsearFechaBarraToSlash(getColumnSpanText(columnas.get(1)));
-        movimiento.put(Constantes.KEY_FECHA_VALOR, fechaValor);
-
-        // Col 3: Nº. Doc.
-        String numeroDoc = getColumnSpanText(columnas.get(3));
-        movimiento.put(Constantes.KEY_OPERACION, numeroDoc);
-
-        // Col 4: Concepto (texto visible en <a.enlace>)
-        String descripcion = getConceptoTexto(columnas.get(4));
-        descripcion = descripcion.replaceAll("\\s+", " ").trim();
-        movimiento.put(Constantes.KEY_DESCRIPCION, descripcion);
-
-        // Col 5: Importe (span con clase monedapos o txtselecroj)
-        String montoText = getColumnSpanText(columnas.get(5));
-        double monto = MetodsGeneric.parseSaldo(montoText); // asumes que maneja comas de miles y signo
-        movimiento.put("monto", monto);
-
-        movimiento.put(Constantes.KEY_REFERENCIA, "");
-
-        if (monto < 0) {
-            movimiento.put("tipo", "DEBITO");
-        } else {
-            movimiento.put("tipo", "CREDITO");
-        }
-
-        // Campos que antes dejabas vacíos para este layout
-        movimiento.put("saldo", "");
-
-        return movimiento;
+        String dd = p[0].length() == 1 ? "0" + p[0] : p[0];
+        String mm = switch (p[1]) {
+            case "ene" -> "01";
+            case "feb" -> "02";
+            case "mar" -> "03";
+            case "abr" -> "04";
+            case "may" -> "05";
+            case "jun" -> "06";
+            case "jul" -> "07";
+            case "ago" -> "08";
+            case "sep" -> "09";
+            case "oct" -> "10";
+            case "nov" -> "11";
+            case "dic" -> "12";
+            default -> p[1];
+        };
+        return dd + "/" + mm + "/" + year.trim();
     }
-
-    // Obtiene el texto del primer <span> dentro de la celda, con normalización NBSP y trim
-    private String getColumnSpanText(WebElement td) {
-        try {
-            WebElement span = td.findElement(By.tagName("span"));
-            return normalize(span.getText());
-        } catch (NoSuchElementException e) {
-            return normalize(td.getText());
-        }
-    }
-
-    // Obtiene el texto visible del concepto desde <td> (texto del <a class="enlace">)
-    private String getConceptoTexto(WebElement td) {
-        try {
-            WebElement a = td.findElement(By.cssSelector("a.enlace"));
-            return normalize(a.getText());
-        } catch (NoSuchElementException e) {
-            return normalize(td.getText());
-        }
-    }
-
-    private String normalize(String s) {
-        if (s == null) return "";
-        return s.replace('\u00A0', ' ').trim();
-    }
-
-    private void rellenarCajasTexto(String valorSeleccionado, WebElement cBanc, WebElement cOfic,
-                                    WebElement cCont, WebElement cFoli) {
-        try {
-            String parteNumerica = valorSeleccionado.contains("@") ?
-                    valorSeleccionado.substring(valorSeleccionado.indexOf('@') + 1) :
-                    valorSeleccionado;
-
-            String soloDigitos = parteNumerica.replaceAll("[^0-9]", "");
-
-            log.info("Número completo extraído: {}", soloDigitos);
-
-            if (soloDigitos.length() == 20) {
-                String cBancValue = soloDigitos.substring(0, 4);        // primeros 4 dígitos
-                String cOficValue = soloDigitos.substring(4, 8);        // siguientes 4 dígitos
-                String cContValue = soloDigitos.substring(8, 10);       // siguientes 2 dígitos
-                String cFoliValue = soloDigitos.substring(10, 20);     // últimos 10 dígitos
-
-                log.info("Partes extraídas - cBanc: {}, cOfic: {}, cCont: {}, cFoli: {}",
-                        cBancValue, cOficValue, cContValue, cFoliValue);
-
-                rellenarCampo(cBanc, cBancValue, 4);
-                rellenarCampo(cOfic, cOficValue, 4);
-                rellenarCampo(cCont, cContValue, 2);
-                rellenarCampo(cFoli, cFoliValue, 10);
-
-                log.info("✅ Campos rellenados exitosamente");
-
-            } else {
-                log.error("El número extraído no tiene la longitud esperada. Longitud: {}", soloDigitos.length());
-            }
-
-        } catch (Exception e) {
-            log.error("Error rellenando cajas de texto: {}", e.getMessage());
-        }
-    }
-
-    private void rellenarCampo(WebElement campo, String valor, int maxLength) {
-        try {
-            campo.clear();
-            MetodsGeneric.randomWait(200, 500);
-
-            campo.sendKeys(valor);
-            log.info("Campo {} rellenado con: {} (longitud: {})",
-                    campo.getAttribute("name"), valor, valor.length());
-
-            if (valor.length() > maxLength) {
-                log.warn("El valor {} excede el maxlength {} del campo {}",
-                        valor, maxLength, campo.getAttribute("name"));
-            }
-
-            MetodsGeneric.randomWait(200, 500);
-
-        } catch (Exception e) {
-            log.error("Error rellenando campo {}: {}", campo.getAttribute("name"), e.getMessage());
-        }
-    }*/
 }

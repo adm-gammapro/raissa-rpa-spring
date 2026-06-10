@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/bbva-empresa")
@@ -149,13 +150,13 @@ public class BBVAEmpresaController {
 
             return ResponseEntity.ok(resp);
 
-        /*} catch (NoSuchElementException e) {
+        } catch (NoSuchElementException e) {
             log.error("Error obteniendo movimientos BBVA: {}", e.getMessage());
 
             loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_ERROR);
             Map<String, Object> errorResponse = ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
 
-            return ResponseEntity.badRequest().body(errorResponse);*/
+            return ResponseEntity.badRequest().body(errorResponse);
         } catch (Exception e) {
             log.error("Error  BBVA: {}", e.getMessage());
 
@@ -170,10 +171,10 @@ public class BBVAEmpresaController {
      * Obtener movimientos historicos del BBVA
      *
      * @param transactionId id de transaccion
-     * @param numCuenta numero de cuenta
-     * @param fechaInicio fecha de inicio para búsqueda
-     * @param fechaFin fecha de fin par abúsqueda
-     * @param request datos de la peticion
+     * @param numCuenta     numero de cuenta
+     * @param fechaInicio   fecha de inicio para búsqueda
+     * @param fechaFin      fecha de fin par abúsqueda
+     * @param request       datos de la peticion
      * @return {@link Map} datos con los movimientos de la cuenta solicitada
      */
     @PostMapping("/transacciones-historicas/{numCuenta}/{transactionId}")
@@ -192,11 +193,12 @@ public class BBVAEmpresaController {
         RequestInformation logRequest = loggingService.logRequest(session, clientIp, Constantes.TIPO_REQUEST_OBTENER_MOV_BBVA, userAgent);
 
         try {
-            Map<String, Object> resp = bbvaEmpresaService.obtenerMovimientosHistoricos(transactionId, numCuenta, fechaInicio, fechaFin);
+            boolean detalle = false;
+            Map<String, Object> resp = bbvaEmpresaService.obtenerMovimientos(transactionId, numCuenta, fechaInicio, fechaFin, detalle);
 
             loggingService.updateResponseStatus(logRequest.getId(), Constantes.RESP_REQUEST_EXITO);
 
-            log.info("Movimientos BBVA obtenido exitosamente, transactionId: {}", transactionId);
+            log.info("Movimientos historicos BBVA obtenido exitosamente, transactionId: {}", transactionId);
 
             return ResponseEntity.ok(resp);
 

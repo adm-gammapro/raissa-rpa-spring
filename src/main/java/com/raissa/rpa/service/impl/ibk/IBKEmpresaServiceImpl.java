@@ -295,7 +295,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
             } catch (Exception ex) {
                 log.warn("Error al cerrar contexto: {}", ex.getMessage());
             }
-            throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
+            throw new IbkException("Error en logout", "IBK_LOGOUT_ERROR", e.getMessage());
         } finally {
             navigatorSessionCache.remove(transactionId);
             log.info("Sesión {} removida del cache", transactionId);
@@ -414,7 +414,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
 
             input.fill("", new Locator.FillOptions().setTimeout(timeoutMs));
 
-            MetodsGeneric.humanTypeText(input, userValue.trim(), 45, 110);
+            MetodsGeneric.humanTypeText(input, userValue.trim(), 120, 220);
         } catch (TimeoutError e) {
             throw IbkException.elementNotFound("input login", "input user");
         } catch (Exception e) {
@@ -467,7 +467,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
 
             MetodsGeneric.clickWithFallback(page, docPasswordInput, timeoutMs);
             docPasswordInput.fill("", new Locator.FillOptions().setTimeout(timeoutMs));
-            MetodsGeneric.humanTypeText(docPasswordInput, password.trim(), 200, 400);
+            MetodsGeneric.humanTypeText(docPasswordInput, password.trim(), 120, 220);
 
             log.info("Clave ingresada exitosamente en campo de texto");
         }
