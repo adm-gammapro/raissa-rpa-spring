@@ -7,16 +7,14 @@ import com.microsoft.playwright.options.WaitForSelectorState;
 import com.microsoft.playwright.options.WaitUntilState;
 import com.raissa.rpa.config.NavigatorSession;
 import com.raissa.rpa.config.SvgDigitClassifier;
-import com.raissa.rpa.exception.BcpException;
 import com.raissa.rpa.exception.IbkException;
-import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.commons.NavigatorService;
 import com.raissa.rpa.service.ibk.IBKEmpresaService;
 import com.raissa.rpa.service.ibk.IbkMenuService;
+import com.raissa.rpa.service.impl.commons.BaseBankService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,20 +25,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
-public class IBKEmpresaServiceImpl implements IBKEmpresaService {
+public class IBKEmpresaServiceImpl extends BaseBankService implements IBKEmpresaService {
     @Value("${banking.ibk.url}")
     private String ibkUrl;
 
     private final IbkMenuService ibkMenuService;
-    private final NavigatorService navigatorService;
 
-    private final ConcurrentMap<String, NavigatorSession> navigatorSessionCache = new ConcurrentHashMap<>();
+    public IBKEmpresaServiceImpl(NavigatorService navigatorService, IbkMenuService ibkMenuService) {
+        super(navigatorService);
+        this.ibkMenuService = ibkMenuService;
+    }
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
@@ -51,12 +48,12 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         Map<String, Object> result;
 
         try {
-            sessionNavegacion = navigatorService.iniciarNavegador(transactionId);
+            sessionNavegacion = navigatorService.iniciarNavegador(transactionId, "INTERBANK");
             Page page = sessionNavegacion.page();
 
             page.navigate(ibkUrl, new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.LOAD)
-                    .setTimeout(30_000));
+                    .setWaitUntil(WaitUntilState.NETWORKIDLE)
+                    .setTimeout(60_000));
 
             MetodsGeneric.randomWaitPage(page,800, 1_000);
 
@@ -129,31 +126,26 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
             }
 
             // 7. ✅ ÉXITO - Almacenar driver y retornar resultado
-            navigatorSessionCache.put(transactionId, sessionNavegacion);
+            cacheSession(transactionId, sessionNavegacion);
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Login IBK exitoso", true);
-
-            log.info("Login IBK completado exitosamente");
-
             success = true;
+
+            log.info("Login IBK completado exitosamente [tx={}]", transactionId);
 
             return result;
         } catch (Exception e) {
-            log.error("Error genérico en login IBK: {}", e.getMessage());
+            log.error("Error en login IBK [tx={}]: {}", transactionId, e.getMessage());
 
-            Map<String, Object> errorResult = ResponseGeneric.buildSuccessResponse(transactionId, "Error interno del sistema. Contacte al administrador.", false);
+            Map<String, Object> errorResult = ResponseGeneric.buildSuccessResponse(
+                    transactionId, "Error interno del sistema. Contacte al administrador.", false);
             errorResult.put(Constantes.KEY_ERROR_CODE, "IBK_GENERIC_ERROR");
             errorResult.put(Constantes.KEY_TEC_MESSAGE, e.getMessage());
 
             return errorResult;
         } finally {
             if (sessionNavegacion != null && !success) {
-                try {
-                    sessionNavegacion.close();
-                    log.info("Sesión Playwright cerrada debido a error");
-                } catch (Exception e) {
-                    log.warn("Error al cerrar sesión Playwright: {}", e.getMessage());
-                }
+                releaseSessionOnError(transactionId, "INTERBANK", sessionNavegacion);
             }
         }
     }
@@ -163,10 +155,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         log.info("Obteniendo saldo IBK, transactionId: {}", transactionId);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             if (!ibkMenuService.closeCampaignPopupIfPresent(page)) {
@@ -198,6 +187,12 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
         } catch (Exception e) {
             log.error("Error obteniendo saldo IBK: {}", e.getMessage());
 
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "INTERBANK", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
@@ -208,10 +203,7 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Movimientos" del menú lateral
@@ -254,15 +246,19 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
 
         } catch (Exception e) {
             log.error("Error obteniendo movimientos IBK: {}", e.getMessage());
+
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "INTERBANK", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
 
     public Map<String, Object> logout(String transactionId) {
-        NavigatorSession session = navigatorSessionCache.get(transactionId);
-        if (session == null) {
-            throw new SessionNotFoundException("Sesión no encontrada");
-        }
+        NavigatorSession session = getSession(transactionId);
         Page page = session.page();
 
         try {
@@ -284,24 +280,21 @@ public class IBKEmpresaServiceImpl implements IBKEmpresaService {
                 log.warn("No se pudo verificar logout exitoso, cerrando navegador directamente");
             }
 
-            // 5. ✅ Cerrar contexto/navegador
-            page.context().close(); // cierra el contexto de esta sesión
+            // ✅ Liberar sesión en el pool
+            releaseSessionOnLogout(transactionId, "INTERBANK", session);
+
             log.debug("Driver cerrado exitosamente");
 
+            return ResponseGeneric.buildSuccessResponse(
+                    transactionId, "Sesión cerrada exitosamente", true);
         } catch (Exception e) {
-            log.error("Error durante logout: {}", e.getMessage());
-            try {
-                page.context().close();
-            } catch (Exception ex) {
-                log.warn("Error al cerrar contexto: {}", ex.getMessage());
-            }
-            throw new IbkException("Error en logout", "IBK_LOGOUT_ERROR", e.getMessage());
-        } finally {
-            navigatorSessionCache.remove(transactionId);
-            log.info("Sesión {} removida del cache", transactionId);
-        }
+            log.error("Error durante logout [tx={}]: {}", transactionId, e.getMessage());
 
-        return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
+            // ✅ Liberar sesión incluso en error
+            releaseSessionOnError(transactionId, "INTERBANK", session);
+
+            throw new IbkException("Error en logout", "IBK_LOGOUT_ERROR", e.getMessage());
+        }
     }
 
     /**

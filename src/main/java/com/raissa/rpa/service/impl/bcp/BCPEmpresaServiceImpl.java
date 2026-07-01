@@ -7,16 +7,15 @@ import com.microsoft.playwright.options.WaitForSelectorState;
 import com.microsoft.playwright.options.WaitUntilState;
 import com.raissa.rpa.config.NavigatorSession;
 import com.raissa.rpa.exception.BcpException;
-import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.bcp.BCPEmpresaService;
 import com.raissa.rpa.service.bcp.BcpMenuService;
 import com.raissa.rpa.service.commons.NavigatorService;
+import com.raissa.rpa.service.impl.commons.BaseBankService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
 import com.twocaptcha.TwoCaptcha;
 import com.twocaptcha.captcha.Normal;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -25,14 +24,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
-public class BCPEmpresaServiceImpl implements BCPEmpresaService {
+public class BCPEmpresaServiceImpl extends BaseBankService implements BCPEmpresaService {
     @Value("${banking.bcp.url}")
     private String bcpUrl;
 
@@ -45,10 +41,13 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
     @Value("${2captcha.polling.interval}")
     private String pollingStr;
 
-    private final NavigatorService navigatorService;
     private final BcpMenuService bcpMenuService;
 
-    private final ConcurrentMap<String, NavigatorSession> navigatorSessionCache = new ConcurrentHashMap<>();
+    // Constructor explícito para inyectar NavigatorService
+    public BCPEmpresaServiceImpl(NavigatorService navigatorService, BcpMenuService bcpMenuService) {
+        super(navigatorService);
+        this.bcpMenuService = bcpMenuService;
+    }
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
@@ -59,18 +58,16 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
         Map<String, Object> result;
 
         try {
-            sessionNavegacion = navigatorService.iniciarNavegador(transactionId);
+            sessionNavegacion = navigatorService.iniciarNavegador(transactionId, "BCP");
             Page page = sessionNavegacion.page();
 
             page.navigate(bcpUrl, new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.LOAD)
-                    .setTimeout(30_000));
+                    .setWaitUntil(WaitUntilState.NETWORKIDLE)
+                    .setTimeout(60_000));
 
             MetodsGeneric.randomWaitPage(page,800, 1000);
 
             log.info("Navegando a: {}", bcpUrl);
-
-            bcpMenuService.manejarModalSesionExpirada(page);
 
             // 1. ✅ Ingresar código de usuario
             enterUserCode(page, credentials.get("codigoUsuario"));
@@ -108,8 +105,7 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                         "Error al verificar el login exitoso");
             }
 
-            // 6. ✅ ÉXITO - Almacenar driver y retornar resultado
-            navigatorSessionCache.put(transactionId, sessionNavegacion);
+            cacheSession(transactionId, sessionNavegacion);
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Login BCP exitoso", true);
 
@@ -128,25 +124,16 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
             return errorResult;
         } finally {
             if (sessionNavegacion != null && !success) {
-                try {
-                    sessionNavegacion.close();
-                    log.info("Sesión Playwright cerrada debido a error");
-                } catch (Exception e) {
-                    log.warn("Error al cerrar sesión Playwright: {}", e.getMessage());
-                }
+                releaseSessionOnError(transactionId, "BCP", sessionNavegacion);
             }
         }
     }
 
     public Map<String, Object> obtenerSaldo(String transactionId) {
-        Map<String, Object> result;
         log.info("Obteniendo saldo BCP, transactionId: {}", transactionId);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             // 0. ✅ Manejar el modal móvil si está abierto
@@ -168,13 +155,19 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
             List<Map<String, Object>> accounts = bcpMenuService.extractAccountsData(page);
 
             // 4. ✅ Retornar resultados
-            result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
+            Map<String, Object> result = ResponseGeneric.buildSuccessResponse(transactionId, "Datos de cuentas obtenidos exitosamente", true);
             result.put(Constantes.KEY_DATA, accounts);
             result.put(Constantes.KEY_COUNT, accounts.size());
 
             return result;
         } catch (Exception e) {
             log.error("Error obteniendo saldo BCP: {}", e.getMessage());
+
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "BCP", session);
+            }
 
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
@@ -186,10 +179,7 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Resumen" del menú lateral
@@ -227,6 +217,13 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
         } catch (Exception e) {
             log.error("Error obteniendo movimientos BCP: {}", e.getMessage());
+
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "BCP", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
@@ -237,10 +234,7 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Resumen" del menú lateral
@@ -278,19 +272,19 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
 
         } catch (Exception e) {
             log.error("Error obteniendo movimientos BCP: {}", e.getMessage());
+
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "BCP", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
 
     public Map<String, Object> logout(String transactionId) {
-        NavigatorSession session = navigatorSessionCache.get(transactionId);
-
-        if (session == null) {
-            throw new BcpException("Sesión no encontrada",
-                    "BCP_SESSION_NOT_FOUND",
-                    "La sesión con ID " + transactionId + " no existe o ya fue cerrada");
-        }
-
+        NavigatorSession session = getSession(transactionId);
         Page page = session.page();
 
         try {
@@ -312,23 +306,18 @@ public class BCPEmpresaServiceImpl implements BCPEmpresaService {
                 log.warn("No se pudo verificar logout exitoso, cerrando navegador directamente");
             }
 
-            // 5. ✅ Cerrar contexto/navegador
-            page.context().close(); // cierra el contexto de esta sesión
+            // ✅ Liberar sesión en el pool
+            releaseSessionOnLogout(transactionId, "BCP", session);
 
+            return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
         } catch (Exception e) {
-            log.error("Error durante logout: {}", e.getMessage());
-            try {
-                page.context().close();
-            } catch (Exception ignored) {
-                log.warn("Error al cerrar contexto: {}", ignored.getMessage());
-            }
-            throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
-        } finally {
-            navigatorSessionCache.remove(transactionId);
-            log.info("Sesión {} removida del cache", transactionId);
-        }
+            log.error("Error durante logout [tx={}]: {}", transactionId, e.getMessage());
 
-        return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
+            // ✅ Liberar sesión incluso en error
+            releaseSessionOnError(transactionId, "BCP", session);
+
+            throw new BcpException("Error en logout", "BCP_LOGOUT_ERROR", e.getMessage());
+        }
     }
 
     /**

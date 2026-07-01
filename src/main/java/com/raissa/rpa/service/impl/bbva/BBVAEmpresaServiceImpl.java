@@ -6,37 +6,32 @@ import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.WaitUntilState;
 import com.raissa.rpa.config.NavigatorSession;
 import com.raissa.rpa.exception.BbvaException;
-import com.raissa.rpa.exception.IbkException;
-import com.raissa.rpa.exception.SessionNotFoundException;
 import com.raissa.rpa.service.bbva.BBVAEmpresaService;
 import com.raissa.rpa.service.bbva.BbvaMenuService;
 import com.raissa.rpa.service.commons.NavigatorService;
+import com.raissa.rpa.service.impl.commons.BaseBankService;
 import com.raissa.rpa.util.Constantes;
 import com.raissa.rpa.util.MetodsGeneric;
 import com.raissa.rpa.util.ResponseGeneric;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
-public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
+public class BBVAEmpresaServiceImpl extends BaseBankService implements BBVAEmpresaService {
     @Value("${banking.bbva.url}")
     private String bbvaUrl;
 
-    private final NavigatorService navigatorService;
     private final BbvaMenuService bbvaMenuService;
 
-    private final ConcurrentMap<String, NavigatorSession> navigatorSessionCache = new ConcurrentHashMap<>();
+    public BBVAEmpresaServiceImpl(NavigatorService navigatorService, BbvaMenuService bbvaMenuService) {
+        super(navigatorService);
+        this.bbvaMenuService = bbvaMenuService;
+    }
 
     public Map<String, Object> login(Map<String, String> credentials,
                                      String transactionId) {
@@ -47,12 +42,12 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         Map<String, Object> result;
 
         try {
-            sessionNavegacion = navigatorService.iniciarNavegador(transactionId);
+            sessionNavegacion = navigatorService.iniciarNavegador(transactionId, "BBVA");
             Page page = sessionNavegacion.page();
 
             page.navigate(bbvaUrl, new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.LOAD)
-                    .setTimeout(30_000));
+                    .setWaitUntil(WaitUntilState.NETWORKIDLE)
+                    .setTimeout(60_000));
 
             log.info("Navegando a: {}", bbvaUrl);
 
@@ -82,8 +77,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                         "Error al verificar el login");
             }
 
-            // 8. ✅ ÉXITO - Almacenar driver y retornar resultado
-            navigatorSessionCache.put(transactionId, sessionNavegacion);
+            cacheSession(transactionId, sessionNavegacion);
 
             result = ResponseGeneric.buildSuccessResponse(transactionId, "Login BBVA exitoso", true);
 
@@ -102,12 +96,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
             return errorResult;
         } finally {
             if (sessionNavegacion != null && !success) {
-                try {
-                    sessionNavegacion.close();
-                    log.info("Sesión Playwright cerrada debido a error");
-                } catch (Exception e) {
-                    log.warn("Error al cerrar sesión Playwright: {}", e.getMessage());
-                }
+                releaseSessionOnError(transactionId, "BBVA", sessionNavegacion);
             }
         }
     }
@@ -117,10 +106,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         log.info("Obteniendo saldo BBVA, transactionId: {}", transactionId);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             boolean clickCuentas = bbvaMenuService.clickCuentas(page);
@@ -148,6 +134,12 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
         } catch (Exception e) {
             log.error("Error obteniendo saldo BBVA: {}", e.getMessage());
 
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "BBVA", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
@@ -158,10 +150,7 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
                 transactionId, numeroCuenta, fechaInicio, fechaFin);
 
         try {
-            NavigatorSession session = navigatorSessionCache.get(transactionId);
-            if (session == null) {
-                throw new SessionNotFoundException("Sesión no encontrada");
-            }
+            NavigatorSession session = getSession(transactionId);
             Page page = session.page();
 
             // 1. ✅ Navegar a la opción "Inicio" del menú lateral
@@ -205,15 +194,19 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         } catch (Exception e) {
             log.error("Error obteniendo movimientos BBVA: {}", e.getMessage());
+
+            // ✅ Si hay error, liberar la sesión
+            NavigatorSession session = navigatorSessionCache.get(transactionId);
+            if (session != null) {
+                releaseSessionOnError(transactionId, "BBVA", session);
+            }
+
             return ResponseGeneric.buildSuccessResponse(transactionId, e.getMessage(), false);
         }
     }
 
     public Map<String, Object> logout(String transactionId) {
-        NavigatorSession session = navigatorSessionCache.get(transactionId);
-        if (session == null) {
-            throw new SessionNotFoundException("Sesión no encontrada");
-        }
+        NavigatorSession session = getSession(transactionId);
         Page page = session.page();
         try {
             log.info("Iniciando proceso de logout para transactionId: {}", transactionId);
@@ -228,25 +221,21 @@ public class BBVAEmpresaServiceImpl implements BBVAEmpresaService {
             }
 
             MetodsGeneric.randomWait(1_000, 2_000);
-            // 2. ✅ CERRAR EL DRIVER
-            page.context().close(); // cierra el contexto de esta sesión
+            // ✅ Liberar sesión en el pool
+            releaseSessionOnLogout(transactionId, "BBVA", session);
+
             log.debug("Driver cerrado exitosamente");
+
+            return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
         } catch (Exception e) {
-            log.error("Error durante logout: {}", e.getMessage());
-            try {
-                page.context().close();
-            } catch (Exception ex) {
-                log.warn("Error al cerrar contexto: {}", ex.getMessage());
-            }
+            log.error("Error durante logout [tx={}]: {}", transactionId, e.getMessage());
+
+            // ✅ Liberar sesión incluso en error
+            releaseSessionOnError(transactionId, "BBVA", session);
+
             throw new BbvaException("Error en logout", "BBVA_LOGOUT_ERROR", e.getMessage());
-        } finally {
-            navigatorSessionCache.remove(transactionId);
-            log.info("Sesión {} removida del cache", transactionId);
         }
-        return ResponseGeneric.buildSuccessResponse(transactionId, "Sesión cerrada exitosamente", true);
     }
-
-
 
     /**
      * Ingresa el código del usuario

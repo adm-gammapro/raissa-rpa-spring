@@ -28,6 +28,10 @@ public class BcpMenuServiceImpl implements BcpMenuService {
                 return false;
             }
 
+            MetodsGeneric.randomWaitPage(page,6_000, 8_000);
+
+            handleFraudAlertModal(page);
+
             return waitAndVerifyLoginSuccess(page);
 
         } catch (InterruptedException e) {
@@ -36,6 +40,70 @@ public class BcpMenuServiceImpl implements BcpMenuService {
         } catch (Exception e) {
             log.error("Error inesperado verificando login: {}", e.getMessage());
             return false;
+        }
+    }
+
+    private void handleFraudAlertModal(Page page) {
+        try {
+            // Selector más específico para el modal dentro del overlay de Angular CDK
+            String modalSelector = "div.cdk-overlay-container bcp-modal.show:has(h3:has-text('Alerta de fraude'))";
+
+            // Esperar a que el modal esté presente en el DOM
+            Locator fraudModal = MetodsGeneric.waitForAttached(page, modalSelector, 5_000);
+
+            log.info("Modal de alerta de fraude detectado, intentando cerrar...");
+
+            // Selector más específico para el botón "Entendido"
+            // Notamos que el botón está dentro de bcp-modal-footer y tiene el id-auto específico
+            String buttonSelector = "div.cdk-overlay-container bcp-modal.show bcp-button[id-auto='modal-manager-secondary'] button.bcp-ffw-btn-primary";
+
+            // Esperar a que el botón esté adjunto y visible
+            Locator entendidoButton = MetodsGeneric.waitForAttached(page, buttonSelector, 3_000);
+
+            // Verificar que sea visible antes de hacer clic
+            entendidoButton.first().waitFor(new Locator.WaitForOptions()
+                    .setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout(2_000));
+
+            // Hacer clic en el botón
+            log.info("Haciendo clic en botón 'Entendido'...");
+            MetodsGeneric.clickWithFallback(page, entendidoButton, 3_000);
+
+            // Esperar a que el modal desaparezca
+            log.info("Esperando que el modal se cierre...");
+            MetodsGeneric.waitForHidden(fraudModal.first(), 5_000);
+
+            log.info("Modal de alerta de fraude cerrado exitosamente");
+
+        } catch (TimeoutError e) {
+            log.info("Modal de alerta de fraude no detectado (no aparece en esta ocasión): {}", e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error manejando el modal de alerta de fraude: {}", e.getMessage());
+
+            // Intento alternativo: buscar directamente por el texto "Entendido"
+            tryAlternativeClose(page);
+        }
+    }
+
+    private void tryAlternativeClose(Page page) {
+        try {
+            log.info("Intentando método alternativo para cerrar el modal...");
+
+            // Buscar directamente el span con texto "Entendido" y hacer clic en su botón padre
+            Locator entendidoSpan = MetodsGeneric.waitForAttached(
+                    page,
+                    "span.character-container:has-text('Entendido')",
+                    2_000
+            );
+
+            // Hacer clic en el botón que contiene este span
+            Locator parentButton = entendidoSpan.locator("..");
+            parentButton.first().click();
+
+            log.info("Modal cerrado con método alternativo");
+
+        } catch (Exception ex) {
+            log.warn("Método alternativo también falló: {}", ex.getMessage());
         }
     }
 
